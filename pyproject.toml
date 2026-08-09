@@ -43,7 +43,10 @@ dependencies = [
 full = [
     "beautifulsoup4>=4.12",
     "tldextract>=5.1",
-    "mmh3>=4.0",
+]
+# Screenshotting / visual triage backend (headless Chromium via Playwright).
+screenshots = [
+    "playwright>=1.40",
 ]
 dev = [
     "pytest>=8.0",
@@ -64,7 +67,7 @@ where = ["."]
 include = ["voidrecon*"]
 
 [tool.setuptools.package-data]
-voidrecon = ["reporting/templates/*.html", "reporting/templates/*.md"]
+voidrecon = ["reporting/templates/*.html", "reporting/templates/*.md", "data/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

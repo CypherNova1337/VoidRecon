@@ -36,11 +36,13 @@ import asyncio
 import sys
 from pathlib import Path
 
+from voidrecon.core import history
 from voidrecon.core.config import Config
 from voidrecon.core.context import RunContext
 from voidrecon.core.logging import setup_logging
 from voidrecon.core.module import PHASE_NAMES, Phase, registry
 from voidrecon.core.pipeline import Pipeline, load_all_modules
+from voidrecon.core.program import import_program_scope
 from voidrecon.core.scope import Scope
 from voidrecon.reporting.report import Reporter
 from voidrecon.version import __codename__, __version__
@@ -69,6 +71,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run a reconnaissance engagement")
     run.add_argument("targets", nargs="*", help="Seed apex domains / IPs / CIDRs (also treated as in-scope)")
     run.add_argument("-u", "--url", help="Program/policy URL (recorded for reference)")
+    run.add_argument(
+        "--import-scope", action="store_true",
+        help="Fetch and merge scope from the --url program page (HackerOne API with creds, "
+             "or best-effort parsing). Never probes the target.",
+    )
     run.add_argument("-i", "--include", action="append", default=[], help="Add an in-scope entry (repeatable)")
     run.add_argument("-x", "--exclude", action="append", default=[], help="Add an out-of-scope entry (repeatable)")
     run.add_argument("-S", "--scope-file", help="File with scope entries (txt lines or JSON/YAML include/exclude)")
@@ -99,6 +106,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # modules -------------------------------------------------------------
     mods = sub.add_parser("modules", help="List available modules")
     mods.add_argument("--phase", help="Filter by phase")
+
+    # diff ----------------------------------------------------------------
+    df = sub.add_parser("diff", help="Diff two runs to see what changed (new/removed assets & findings)")
+    df.add_argument("paths", nargs="*", help="Two run dirs/JSON files, or a target slug (uses latest two runs)")
+    df.add_argument("-d", "--dir", default="runs", help="Base output directory to search (default: runs)")
+    df.add_argument("--json", action="store_true", help="Emit the diff as JSON")
 
     # scope ---------------------------------------------------------------
     sc = sub.add_parser("scope", help="Parse and display effective scope without running")
@@ -244,9 +257,31 @@ async def _run(args) -> int:
     from voidrecon.core.logging import get_logger
 
     cfg = Config.load(args.config, overrides=_config_overrides(args))
-    scope = _build_scope(args, bool(cfg.get("general.wildcard_apex", True)))
+    wildcard_apex = bool(cfg.get("general.wildcard_apex", True))
+    scope = _build_scope(args, wildcard_apex)
+
+    if getattr(args, "import_scope", False):
+        if not args.url:
+            print("error: --import-scope requires --url", file=sys.stderr)
+            return 2
+        imported = await import_program_scope(args.url)
+        for entry in imported.include:
+            scope.add_include(entry, wildcard_apex=wildcard_apex)
+        for entry in imported.exclude:
+            from voidrecon.core.scope import ScopeRule
+
+            rule = ScopeRule.parse(entry, wildcard_apex=wildcard_apex)
+            if rule:
+                scope.exclude.append(rule)
+        if imported.ok:
+            print(f"imported scope from {imported.platform} "
+                  f"({len(imported.include)} in-scope, {len(imported.exclude)} out-of-scope): "
+                  f"{imported.note}", file=sys.stderr)
+        else:
+            print(f"scope import: {imported.note}", file=sys.stderr)
+
     if not scope.include:
-        print("error: no targets/scope provided. Give a domain or use --include/--scope-file.", file=sys.stderr)
+        print("error: no targets/scope provided. Give a domain or use --include/--scope-file/--import-scope.", file=sys.stderr)
         return 2
 
     level = "debug" if args.verbose else ("warning" if args.quiet else cfg.get("general.log_level", "info"))
@@ -326,6 +361,59 @@ def _cmd_modules(args) -> int:
     return 0
 
 
+def _cmd_diff(args) -> int:
+    paths = args.paths or []
+    # Resolve two run files: explicit paths, or the latest two runs for a target slug.
+    if len(paths) >= 2:
+        old_path, new_path = paths[0], paths[1]
+    elif len(paths) == 1 and (Path(paths[0]).exists()):
+        # single explicit path -> diff against the previous run in its parent dir
+        runs = history.find_runs(Path(paths[0]).parent.parent if Path(paths[0]).is_file() else args.dir)
+        if len(runs) < 2:
+            print("need at least two runs to diff", file=sys.stderr)
+            return 2
+        old_path, new_path = runs[-2], runs[-1]
+    else:
+        target = paths[0] if paths else None
+        runs = history.find_runs(args.dir, target)
+        if len(runs) < 2:
+            print(f"need at least two runs to diff (found {len(runs)} in {args.dir})", file=sys.stderr)
+            return 2
+        old_path, new_path = runs[-2], runs[-1]
+
+    diff = history.diff_runs(history.load_run(old_path), history.load_run(new_path))
+
+    if args.json:
+        import json as _json
+
+        print(_json.dumps(diff.__dict__, indent=2, default=str))
+        return 0
+
+    print(f"Diff  {diff.old_label}  ->  {diff.new_label}\n")
+    if diff.is_empty():
+        print("  No changes.")
+        return 0
+    if diff.new_assets:
+        print(f"  + {len(diff.new_assets)} new asset(s):")
+        for a in diff.new_assets[:40]:
+            print(f"      [{a.get('score',0):>3}] {a.get('kind')}: {a.get('value')}")
+    if diff.removed_assets:
+        print(f"  - {len(diff.removed_assets)} removed asset(s):")
+        for a in diff.removed_assets[:40]:
+            print(f"      {a.get('kind')}: {a.get('value')}")
+    if diff.new_findings:
+        print(f"  + {len(diff.new_findings)} new finding(s):")
+        for f in diff.new_findings[:40]:
+            print(f"      [{f.get('severity','info').upper()}] {f.get('title')}")
+    if diff.resolved_findings:
+        print(f"  - {len(diff.resolved_findings)} resolved finding(s)")
+    if diff.score_jumps:
+        print(f"  ~ {len(diff.score_jumps)} score change(s):")
+        for s in diff.score_jumps[:40]:
+            print(f"      {s['asset']}: {s['from']} -> {s['to']} ({s['delta']:+})")
+    return 0
+
+
 def _cmd_scope(args) -> int:
     scope = _build_scope(args, wildcard_apex=True)
     print("Seeds:      ", ", ".join(scope.seeds) or "—")
@@ -348,6 +436,8 @@ def main(argv: list[str] | None = None) -> int:
             return 130
     if args.command == "modules":
         return _cmd_modules(args)
+    if args.command == "diff":
+        return _cmd_diff(args)
     if args.command == "scope":
         return _cmd_scope(args)
     return 1

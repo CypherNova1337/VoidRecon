@@ -40,13 +40,20 @@ modules:
   # Per-module options, e.g.:
   # port_scan:
   #   ports: [80, 443, 8080, 8443]
+  # asn_map:
+  #   max_prefixes: 512      # cap announced prefixes recorded per ASN
+  # crawl:
+  #   depth: 2               # native crawler link depth
+  #   max_pages: 250         # native crawler page budget
 
 sources:
   # All optional. Prefer env vars, e.g. VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx
-  github_token: null
-  shodan_api_key: null
-  securitytrails_api_key: null
-  virustotal_api_key: null
+  github_token: null            # GitHub code-search dorking
+  shodan_api_key: null          # favicon-hash pivoting (cross-internet asset discovery)
+  securitytrails_api_key: null  # richer passive DNS
+  virustotal_api_key: null      # richer passive DNS
+  # HackerOne scope import reads these from the environment directly:
+  #   VOIDRECON_SOURCES_HACKERONE_USERNAME, VOIDRECON_SOURCES_HACKERONE_TOKEN
 
 intel:
   llm_enabled: false

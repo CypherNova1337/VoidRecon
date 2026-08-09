@@ -64,11 +64,18 @@ class HttpProbe(Module):
             self.log.info("no in-scope resolving hosts to probe")
             return
 
-        # Prefer httpx binary if present — it's faster and richer.
+        # Prefer the ProjectDiscovery httpx binary if present — faster and richer.
+        # If it yields nothing (e.g. a different 'httpx' shadows it on PATH), fall
+        # back to the native probe so the phase still produces results.
         if ctx.tools.has("httpx"):
-            await self._probe_with_httpx(ctx, targets)
-            return
+            alive = await self._probe_with_httpx(ctx, targets)
+            if alive > 0:
+                return
+            self.log.info("httpx binary produced no results — using native probe")
 
+        await self._native_probe(ctx, targets)
+
+    async def _native_probe(self, ctx: RunContext, targets) -> None:
         sem = asyncio.Semaphore(int(ctx.config.get("opsec.max_concurrency", 20)))
 
         async def worker(asset):
@@ -87,7 +94,8 @@ class HttpProbe(Module):
                 continue
             body = resp.text[:200_000]
             title = self._title(body)
-            techs = self._fingerprint(dict(resp.headers), body)
+            headers = dict(resp.headers)
+            techs = self._fingerprint(headers, body)
             asset.attrs.update(
                 {
                     "http_url": str(resp.url),
@@ -96,6 +104,7 @@ class HttpProbe(Module):
                     "http_server": resp.headers.get("server"),
                     "technologies": techs,
                     "content_length": len(resp.content),
+                    "fp_headers": self._fp_headers(headers, body),
                 }
             )
             asset.tags.add("web")
@@ -118,6 +127,17 @@ class HttpProbe(Module):
             return re.sub(r"\s+", " ", m.group(1)).strip()[:200]
         return None
 
+    def _fp_headers(self, headers: dict, body: str) -> dict:
+        """Capture a small allowlist of version-bearing headers for CVE matching."""
+        lowered = {k.lower(): v for k, v in headers.items()}
+        keep = ("server", "x-powered-by", "x-jenkins", "x-generator",
+                "x-aspnet-version", "x-drupal-dynamic-cache")
+        out = {k: lowered[k] for k in keep if k in lowered}
+        m = re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']([^"\']+)["\']', body, re.I)
+        if m:
+            out["generator"] = m.group(1)
+        return out
+
     def _fingerprint(self, headers: dict, body: str) -> list[str]:
         techs: set[str] = set()
         lowered = {k.lower(): v for k, v in headers.items()}
@@ -129,7 +149,7 @@ class HttpProbe(Module):
                 techs.add(tech)
         return sorted(techs)
 
-    async def _probe_with_httpx(self, ctx: RunContext, targets) -> None:
+    async def _probe_with_httpx(self, ctx: RunContext, targets) -> int:
         hosts = "\n".join(a.value for a in targets)
         result = await run_tool(
             "httpx",
@@ -138,8 +158,8 @@ class HttpProbe(Module):
             timeout=600,
         )
         if not result.ok:
-            self.log.warning("httpx invocation failed; falling back to native probe")
-            return
+            self.log.debug("httpx invocation failed (rc=%s)", result.returncode)
+            return 0
         import json
 
         by_host = {a.value: a for a in targets}
@@ -154,16 +174,19 @@ class HttpProbe(Module):
             if not asset:
                 continue
             alive += 1
+            server = row.get("webserver") or row.get("server")
             asset.attrs.update(
                 {
                     "http_url": row.get("url"),
                     "http_status": row.get("status_code") or row.get("status-code"),
                     "http_title": row.get("title"),
-                    "http_server": row.get("webserver") or row.get("server"),
+                    "http_server": server,
                     "technologies": row.get("tech") or row.get("technologies") or [],
+                    "fp_headers": {"server": server} if server else {},
                 }
             )
             asset.tags.add("web")
             if row.get("url"):
                 ctx.add_asset(AssetKind.URL, row["url"], source=self.name, confidence=Confidence.CONFIRMED)
         self.log.info("httpx probed %d hosts; %d responded", len(targets), alive)
+        return alive

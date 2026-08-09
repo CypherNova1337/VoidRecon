@@ -197,6 +197,19 @@ class Reporter:
                 f"<td>{esc((a.attrs.get('http_title') or '')[:60])}</td><td class=sig>{esc(sig)}</td></tr>"
             )
 
+        shots = [a for a in self.store.assets() if a.attrs.get("screenshot")]
+        shots.sort(key=lambda a: -a.score)
+        gallery_html = ""
+        if shots:
+            cells = "".join(
+                f'<figure><a href="{esc(a.attrs["screenshot"])}" target="_blank">'
+                f'<img loading="lazy" src="{esc(a.attrs["screenshot"])}" alt="{esc(a.value)}"></a>'
+                f'<figcaption>{esc(a.value)} '
+                f'<span class="sc">{esc(a.attrs.get("http_status",""))}</span></figcaption></figure>'
+                for a in shots[:120]
+            )
+            gallery_html = f'<section><h2>Visual triage ({len(shots)})</h2><div class="gallery">{cells}</div></section>'
+
         llm_html = ""
         if llm:
             targets = "".join(
@@ -239,6 +252,11 @@ class Reporter:
   td.score {{ font-weight:700; color:var(--accent); }}
   td.sig {{ color:var(--muted); font-size:12px; }}
   code {{ background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }}
+  .gallery {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }}
+  figure {{ margin:0; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }}
+  figure img {{ width:100%; height:150px; object-fit:cover; object-position:top; display:block; background:#000; }}
+  figcaption {{ padding:6px 8px; font-size:12px; color:var(--muted); word-break:break-all; }}
+  figcaption .sc {{ color:var(--accent); }}
   footer {{ padding:20px 24px; color:var(--muted); font-size:12px; border-top:1px solid var(--border); text-align:center; }}
 </style></head>
 <body>
@@ -250,6 +268,7 @@ class Reporter:
   <section><h2>Attack surface</h2><div class="cards">{cards}</div></section>
   {llm_html}
   <section><h2>Findings</h2>{findings_html}</section>
+  {gallery_html}
   <section><h2>Prioritised targets</h2>
     <table><thead><tr><th>Score</th><th>Host</th><th>Scope</th><th>Status</th><th>Title</th><th>Signals</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=6>No scored hosts.</td></tr>'}</tbody></table>

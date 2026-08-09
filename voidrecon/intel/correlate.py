@@ -44,6 +44,8 @@ def correlate(ctx: RunContext) -> None:
     _cluster_by_ip(ctx)
     _flag_takeover_candidates(ctx)
     _dense_netblocks(ctx)
+    _cluster_by_favicon(ctx)
+    _cluster_by_tracker(ctx)
     _out_of_scope_leads(ctx)
 
 
@@ -129,6 +131,49 @@ def _safe_in(ip: str, net) -> bool:
         return ip_address(ip) in net
     except ValueError:
         return False
+
+
+def _cluster_by_favicon(ctx: RunContext) -> None:
+    by_hash: dict[int, list[str]] = defaultdict(list)
+    for asset in ctx.store.assets():
+        fh = asset.attrs.get("favicon_hash")
+        if fh is not None:
+            by_hash[fh].append(asset.value)
+    for fh, hosts in by_hash.items():
+        if len(hosts) >= 2:
+            ctx.add_finding(
+                f"{len(hosts)} hosts share favicon hash {fh}",
+                module="correlate",
+                severity=Severity.INFO,
+                description=(
+                    "Identical favicons across hosts indicate shared infrastructure or "
+                    "cloned deployments (staging/shadow copies). Pivot on this hash in "
+                    "Shodan/Censys to find further assets across the internet."
+                ),
+                evidence={"favicon_hash": fh, "hosts": sorted(hosts)[:50]},
+                tags={"favicon", "cluster"},
+            )
+
+
+def _cluster_by_tracker(ctx: RunContext) -> None:
+    by_tracker: dict[str, list[str]] = defaultdict(list)
+    for asset in ctx.store.assets():
+        for tracker in asset.attrs.get("trackers") or []:
+            by_tracker[tracker].append(asset.value)
+    for tracker, hosts in by_tracker.items():
+        if len(set(hosts)) >= 2:
+            ctx.add_finding(
+                f"Shared analytics/tracking ID links {len(set(hosts))} hosts ({tracker})",
+                module="correlate",
+                severity=Severity.INFO,
+                description=(
+                    "Multiple hosts embed the same tracking identifier — strong evidence they "
+                    "belong to the same organisation. Use this to confirm ownership of hosts "
+                    "whose names don't obviously relate, and as a lead for scope expansion."
+                ),
+                evidence={"tracker": tracker, "hosts": sorted(set(hosts))[:50]},
+                tags={"tracker", "cluster", "attribution"},
+            )
 
 
 def _out_of_scope_leads(ctx: RunContext) -> None:

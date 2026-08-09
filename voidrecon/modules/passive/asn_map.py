@@ -22,6 +22,24 @@ from voidrecon.core.module import Module, Phase, register
 
 _RIPESTAT = "https://stat.ripe.net/data"
 
+# Shared CDN / cloud / hosting ASNs. A seed resolving into one of these does NOT
+# mean the target owns the AS, so we record it but never expand its (often
+# thousands of) announced prefixes into the target's footprint.
+_SHARED_ASNS = {
+    "AS13335", "AS209242",                               # Cloudflare
+    "AS20940", "AS16625", "AS12222", "AS32787", "AS35994",  # Akamai
+    "AS54113",                                            # Fastly
+    "AS16509", "AS14618", "AS8987", "AS16509",           # AWS
+    "AS15169", "AS396982", "AS19527",                    # Google
+    "AS8075", "AS8068", "AS8069", "AS12076",             # Microsoft / Azure
+    "AS36459",                                            # GitHub
+    "AS2635",                                             # Automattic / WordPress
+    "AS19551", "AS30148",                                # Imperva / Sucuri
+    "AS13414", "AS54115",                                # misc CDNs
+    "AS16276", "AS24940",                                # OVH / Hetzner (shared hosting)
+    "AS14061", "AS20473",                                # DigitalOcean / Vultr
+}
+
 
 @register
 class AsnMap(Module):
@@ -80,18 +98,34 @@ class AsnMap(Module):
         holder = None
         if overview and overview.get("status") == "ok":
             holder = overview.get("data", {}).get("holder")
-        ctx.add_asset(AssetKind.ASN, asn, source=self.name, holder=holder, origin_seed=seed)
+        asn_asset = ctx.add_asset(AssetKind.ASN, asn, source=self.name, holder=holder, origin_seed=seed)
 
+        # Do not claim shared-infrastructure ASNs as the target's footprint.
+        if asn in _SHARED_ASNS:
+            if asn_asset:
+                asn_asset.tags.add("shared-infra")
+            self.log.info("%s (%s) is shared infrastructure — not expanding its prefixes", asn, holder)
+            return
+
+        max_prefixes = int(ctx.config.get("modules.asn_map.max_prefixes", 512))
         prefixes = await ctx.http.get_json(
             f"{_RIPESTAT}/announced-prefixes/data.json", params={"resource": asn}
         )
         count = 0
+        capped = False
         if prefixes and prefixes.get("status") == "ok":
-            for entry in prefixes.get("data", {}).get("prefixes", []):
+            entries = prefixes.get("data", {}).get("prefixes", [])
+            if len(entries) > max_prefixes:
+                capped = True
+                entries = entries[:max_prefixes]
+            for entry in entries:
                 pfx = entry.get("prefix")
                 if pfx:
                     ctx.add_asset(AssetKind.CIDR, pfx, source=self.name, asn=asn, holder=holder)
                     count += 1
+        if capped:
+            self.log.info("%s announces >%d prefixes; capped (raise modules.asn_map.max_prefixes)",
+                          asn, max_prefixes)
         if count:
             ctx.add_finding(
                 f"{asn} ({holder or 'unknown holder'}) announces {count} prefixes",

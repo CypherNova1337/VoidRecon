@@ -16,7 +16,7 @@
 
 ---
 
-> 🚧 **Work in progress.** VoidRecon is under active development. The engine, the deep passive/OSINT layer, active probing, JavaScript analysis, and aggressive mode are functional today; other modules are being expanded (see [Roadmap](#roadmap)). Interfaces and defaults may change between releases.
+> 🚧 **Work in progress.** VoidRecon is under active development and interfaces/defaults may change between releases. The engine and all core capabilities below are functional today.
 
 VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, and an extensible module system.
 
@@ -39,13 +39,15 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
-| **scope** | Org footprint: ASN + netblock mapping from seed domains | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS, web archives, GitHub dorking | No (third-party data) |
+| **scope** | Org footprint: ASN + netblock mapping from seed domains (shared-CDN ASNs are recognised and not mis-claimed) | No (routing registries) |
+| **passive** | Cert transparency, aggregated passive DNS, web archives, GitHub dorking, cloud-bucket discovery | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains (feeds takeover detection) | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | JavaScript secret/endpoint mining, crawling | **Yes** — gated |
-| **vuln** | Fingerprint→known-issue correlation, template scanning, exposed-app flags | **Yes** — gated |
-| **intel** | Scoring, correlation (host clusters, dangling records, dense netblocks), optional LLM analysis | No |
+| **content** | Native crawler (links/forms/params, robots & sitemap mining), JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (local dataset), template scanning, exposed-app flags | **Yes** — gated |
+| **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
+
+Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
 
 A single dead source never aborts a run — the error is logged and the engagement continues, exactly how an operator works.
 
@@ -82,10 +84,21 @@ voidrecon run example.com --active --only http_probe,port_scan,tech_cve
 voidrecon run example.com --aggressive
 voidrecon run example.com --aggressive --yes   # skip the prompt (automation)
 
+# Import scope directly from a bug bounty program
+voidrecon run --url https://hackerone.com/example --import-scope
+
+# Compare the two most recent runs for a target (what changed?)
+voidrecon diff example.com
+
 # Inspect available modules / verify how a host classifies against your scope
 voidrecon modules
 voidrecon scope example.com --include "*.example.com" --check dev.example.com
 ```
+
+Scope import uses the platform API when credentials are present (HackerOne:
+`VOIDRECON_SOURCES_HACKERONE_USERNAME` + `VOIDRECON_SOURCES_HACKERONE_TOKEN`) and
+falls back to best-effort parsing otherwise. It never probes the target and never
+widens scope silently — it prints exactly what it imported.
 
 Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table.
 
@@ -143,6 +156,9 @@ opsec:
 export VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx          # enables GitHub dorking
 export VOIDRECON_SOURCES_SECURITYTRAILS_API_KEY=xxx    # enriches passive DNS
 export VOIDRECON_SOURCES_VIRUSTOTAL_API_KEY=xxx
+export VOIDRECON_SOURCES_SHODAN_API_KEY=xxx            # favicon-hash pivoting
+export VOIDRECON_SOURCES_HACKERONE_USERNAME=xxx        # scope import (with token)
+export VOIDRECON_SOURCES_HACKERONE_TOKEN=xxx
 ```
 
 Everything works without any keys — configured sources simply add depth.
@@ -192,21 +208,32 @@ voidrecon/
 ├── intel/                 # scoring, correlation, provider-agnostic LLM layer
 ├── modules/               # auto-discovered recon modules (passive/active/content/vuln)
 ├── reporting/             # JSON / Markdown / HTML report generation
-└── utils/                 # domain/IP parsing, secret patterns
+├── data/                  # bundled datasets (CVE signatures)
+└── utils/                 # domain/IP parsing, secret patterns, hashing, version compare
 configs/default.yaml       # default configuration
 tests/                     # pytest suite
 ```
 
+## Screenshots & visual triage
+
+The `screenshot` module (opt-in / aggressive) renders each live in-scope host with
+headless Chromium and the HTML report builds a visual gallery, so you can triage
+hundreds of hosts at a glance. Install the backend with `pip install -e ".[screenshots]"`
+(then `playwright install chromium` if no browser is present). It honours
+`HTTPS_PROXY`/`HTTP_PROXY` for use behind a corporate proxy.
+
 ## Roadmap
 
-VoidRecon ships today with the complete engine and a deep passive/OSINT layer, plus functional active probing and JS analysis. Actively growing:
+VoidRecon now ships with the complete engine plus deep passive/OSINT, org
+footprinting, active probing & port discovery, a native crawler, JS secret/endpoint
+mining, favicon-hash & tracking-ID pivoting, cloud-bucket discovery, native
+CVE correlation, screenshotting, and run-to-run diffing. Still growing:
 
-- Native deep crawler (link/form/XHR endpoint & parameter mapping)
-- Native CVE correlation against a local product/version dataset
-- Favicon-hash and analytics-ID pivoting for cross-internet asset discovery
-- Cloud-asset discovery (buckets, blobs, functions)
-- Screenshotting and visual triage
-- Historical diffing between runs
+- Expanded CVE signature dataset and auto-refresh from public feeds
+- Headless-browser-aware (XHR/SPA) crawling in the native crawler
+- Censys pivoting alongside Shodan
+- Passive credential-leak correlation
+- Historical trend dashboards across many runs
 
 ## Contributing
 
