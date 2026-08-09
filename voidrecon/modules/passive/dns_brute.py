@@ -62,9 +62,12 @@ class DnsBrute(Module):
                                             50000 if aggressive else 15000))
         do_permute = bool(ctx.config.get("modules.dns_brute.permutations", True))
 
+        from voidrecon.utils.resolvers import apply_resolvers
+
         resolver = dns.asyncresolver.Resolver()
         resolver.lifetime = 5.0
         resolver.timeout = 5.0
+        apply_resolvers(resolver, ctx.config)
         sem = asyncio.Semaphore(int(ctx.config.get("opsec.max_concurrency", 20)))
 
         total_found = 0

@@ -35,6 +35,10 @@ KNOWN_TOOLS: dict[str, str] = {
     "gospider": "crawling",
     "whois": "registration lookup",
     "gowitness": "screenshotting",
+    # VoidSec-Hub tooling — used automatically when installed.
+    "dns-helix": "fast DNS permutation scanner + resolver",
+    "paramvoid": "HTTP parameter discovery",
+    "sourcemapper": "javascript source-map extraction",
 }
 
 

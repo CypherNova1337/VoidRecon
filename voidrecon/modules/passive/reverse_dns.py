@@ -39,9 +39,12 @@ class ReverseDns(Module):
         ips = ctx.store.assets(kind=AssetKind.IP)
         if not ips:
             return
+        from voidrecon.utils.resolvers import apply_resolvers
+
         resolver = dns.asyncresolver.Resolver()
         resolver.lifetime = 5.0
         resolver.timeout = 5.0
+        apply_resolvers(resolver, ctx.config)
         sem = asyncio.Semaphore(int(ctx.config.get("opsec.max_concurrency", 20)))
 
         new_related = 0

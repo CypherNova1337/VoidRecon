@@ -37,13 +37,15 @@ import sys
 from pathlib import Path
 
 from voidrecon.core import db, history, notify
+from voidrecon.core.checkpoint import Checkpoint, find_run_dir
 from voidrecon.core.config import Config
 from voidrecon.core.context import RunContext
-from voidrecon.core.logging import setup_logging
+from voidrecon.core.logging import set_console_level, setup_logging
 from voidrecon.core.module import PHASE_NAMES, Phase, registry
 from voidrecon.core.pipeline import Pipeline, load_all_modules
 from voidrecon.core.program import import_program_scope
 from voidrecon.core.scope import Scope
+from voidrecon.reporting.live import LiveMonitor, NullMonitor
 from voidrecon.reporting.report import Reporter
 from voidrecon.version import __codename__, __version__
 
@@ -105,6 +107,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--llm-provider", help="openai | anthropic | ollama | openai_compatible")
     run.add_argument("--llm-model", help="Model name for the selected provider")
     run.add_argument("--disable", action="append", default=[], help="Disable a module by name (repeatable)")
+    run.add_argument("--resume", metavar="RUN_ID",
+                     help="Resume an interrupted run by its id (reloads its checkpoint, skips completed modules)")
+    run.add_argument("--no-live", action="store_true", help="Disable the live progress display")
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose (debug) logging")
     run.add_argument("-q", "--quiet", action="store_true", help="Only warnings and errors")
     run.add_argument("--no-banner", action="store_true", help="Suppress the banner")
@@ -128,6 +133,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # update-cve ----------------------------------------------------------
     uc = sub.add_parser("update-cve", help="Fetch/merge an external CVE signature dataset")
     uc.add_argument("url", help="URL to a JSON dataset ({\"signatures\": [...]})")
+
+    # serve ---------------------------------------------------------------
+    sv = sub.add_parser("serve", help="Browse the SQLite datastore in a local web UI")
+    sv.add_argument("--db", help="Path to voidrecon.db (default: <output_dir>/voidrecon.db)")
+    sv.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=8787, help="Bind port (default: 8787)")
 
     # scope ---------------------------------------------------------------
     sc = sub.add_parser("scope", help="Parse and display effective scope without running")
@@ -323,9 +334,28 @@ async def _run(args) -> int:
 
     level = "debug" if args.verbose else ("warning" if args.quiet else cfg.get("general.log_level", "info"))
     ctx = RunContext(cfg, scope)
+
+    completed: set[str] = set()
+    if getattr(args, "resume", None):
+        run_dir = find_run_dir(cfg.get("general.output_dir", "runs"), args.resume)
+        if not run_dir:
+            print(f"error: no resumable run found for '{args.resume}'", file=sys.stderr)
+            await ctx.aclose()
+            return 2
+        ctx.run_id = run_dir.name
+        ctx.output_dir = run_dir
+
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(level, logfile=ctx.output_dir / "voidrecon.log")
     log = get_logger()
+
+    checkpoint = Checkpoint(ctx.output_dir / "checkpoint.json")
+    if getattr(args, "resume", None):
+        data = checkpoint.load()
+        if data:
+            completed = Checkpoint.restore_store(ctx, data)
+            log.info("resumed %s: restored %d assets, skipping %d completed modules",
+                     ctx.run_id, len(ctx.store), len(completed))
 
     if not args.no_banner and not args.quiet:
         print(_BANNER)
@@ -361,14 +391,27 @@ async def _run(args) -> int:
 
     only = [m.strip() for m in args.only.split(",")] if args.only else None
 
-    pipeline = Pipeline(ctx, phases=phases, only=only)
+    # Live progress display (checklist) unless disabled / non-interactive / quiet.
+    from voidrecon.core.logging import console as _log_console
+
+    live_on = (not args.quiet and not getattr(args, "no_live", False)
+               and sys.stdout.isatty() and _log_console is not None)
+    monitor = LiveMonitor(console=_log_console, enabled=live_on) if live_on else NullMonitor()
+    if live_on:
+        set_console_level("warning")  # keep INFO chatter in the logfile, not over the table
+
+    pipeline = Pipeline(ctx, phases=phases, only=only,
+                        monitor=monitor, checkpoint=checkpoint, completed=completed)
     try:
-        summary = await pipeline.run()
+        with monitor:
+            summary = await pipeline.run()
         reporter = Reporter(ctx, summary)
         written = reporter.write_all(cfg.get("reporting.formats", ["json", "markdown", "html"]))
         await notify.send(ctx, summary)
     finally:
         await ctx.aclose()
+    if live_on:
+        set_console_level(level)  # restore for the final summary lines
 
     if cfg.get("general.sqlite", True):
         db_path = Path(cfg.get("general.output_dir", "runs")) / "voidrecon.db"
@@ -508,6 +551,19 @@ def _cmd_update_cve(args) -> int:
     return 0
 
 
+def _cmd_serve(args) -> int:
+    from voidrecon.reporting.webserver import serve
+
+    cfg = Config.load()
+    db_path = args.db or str(Path(cfg.get("general.output_dir", "runs")) / "voidrecon.db")
+    try:
+        serve(db_path, host=args.host, port=args.port)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _cmd_scope(args) -> int:
     scope = _build_scope(args, wildcard_apex=True)
     print("Seeds:      ", ", ".join(scope.seeds) or "—")
@@ -536,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_dashboard(args)
     if args.command == "update-cve":
         return _cmd_update_cve(args)
+    if args.command == "serve":
+        return _cmd_serve(args)
     if args.command == "scope":
         return _cmd_scope(args)
     return 1

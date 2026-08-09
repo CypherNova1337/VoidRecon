@@ -64,6 +64,10 @@ class Module:
     def __init__(self) -> None:
         self.log = get_logger(self.name)
 
+    @property
+    def phase_name(self) -> str:
+        return PHASE_NAMES[self.phase]
+
     async def run(self, ctx: RunContext) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 

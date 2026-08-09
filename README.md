@@ -18,7 +18,7 @@
 
 > 🚧 **Work in progress.** VoidRecon is under active development and interfaces/defaults may change between releases. The engine and all core capabilities below are functional today.
 
-VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, and an extensible module system.
+VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, a **live progress checklist**, resumable runs, a SQLite datastore with a web UI, and an extensible module system.
 
 > ⚠️ **Authorized use only.** VoidRecon is built for bug bounty programs and sanctioned penetration tests. Passive collection is on by default; anything that *touches the target* is gated behind an explicit `--active` flag **and** a positive in-scope check. You are responsible for staying within your authorization and the law.
 
@@ -43,8 +43,8 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA), breach correlation (HaveIBeenPwned) | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler + SPA/XHR headless crawler, directory/file fuzzing (soft-404 aware), deep tech fingerprinting, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (auto-refreshable dataset), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **content** | Native crawler + SPA/XHR headless crawler, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), deep tech fingerprinting, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (auto-refreshable dataset), vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
@@ -96,6 +96,12 @@ voidrecon dashboard example.com
 # Refresh the local CVE signature dataset from an external feed
 voidrecon update-cve https://example.com/voidrecon-cve.json
 
+# Resume an interrupted run exactly where it stopped
+voidrecon run example.com --resume example.com-20260809-184438
+
+# Browse all runs, assets, and findings in a local web UI
+voidrecon serve            # http://127.0.0.1:8787
+
 # Inspect available modules / verify how a host classifies against your scope
 voidrecon modules
 voidrecon scope example.com --include "*.example.com" --check dev.example.com
@@ -106,7 +112,11 @@ Scope import uses the platform API when credentials are present (HackerOne:
 falls back to best-effort parsing otherwise. It never probes the target and never
 widens scope silently — it prints exactly what it imported.
 
-Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table and screenshot gallery. Every run is also appended to a shared SQLite database (`runs/voidrecon.db`) that powers `voidrecon diff` and `voidrecon dashboard`.
+While a run is in progress, VoidRecon shows a **live checklist** in the terminal — every planned module grouped by phase, each with a live status (pending / running / done / error), its elapsed time and assets added, plus running totals of the surface and findings. Disable it with `--no-live` (it's automatically off in pipes/CI). Detailed per-module logs still stream to `runs/<run>/voidrecon.log`.
+
+Runs are **resumable**: after every module the datastore is checkpointed, so `--resume <run_id>` reloads it and continues from the next unfinished module — no lost hours if a scan is interrupted.
+
+Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table and screenshot gallery. Every run is also appended to a shared SQLite database (`runs/voidrecon.db`) that powers `voidrecon diff`, `voidrecon dashboard`, and the `voidrecon serve` web UI.
 
 ### Aggressive mode
 
@@ -282,6 +292,24 @@ make run      # CLI help
 ```
 
 CI (GitHub Actions) runs ruff + pytest on Python 3.10–3.12 for every push and PR.
+
+## Integrations & credits
+
+VoidRecon works standalone, but plays well with best-in-class tooling from the
+VoidSec-Hub arsenal and the wider community — used automatically when present:
+
+- **[dns-helix](https://github.com/CypherNova1337/dns-helix)** — its recommended
+  resolver list is bundled and used for fast, reliable resolution/brute-force; the
+  `dns-helix` binary is orchestrated when installed.
+- **[paramvoid](https://github.com/CypherNova1337/paramvoid)** — its parameter
+  wordlist ships with VoidRecon and the `paramvoid` binary is used for parameter
+  discovery when installed.
+- **[GF_Patterns](https://github.com/CypherNova1337/GF_Patterns)** — its
+  vulnerability parameter sets power the `vuln_hints` URL classifier.
+- ProjectDiscovery (`subfinder`, `httpx`, `naabu`, `nuclei`, `katana`), `gau`,
+  `gospider`, `gowitness`, `amass` — orchestrated when on `PATH`.
+
+Everything degrades gracefully when a tool or key is absent — nothing is required.
 
 ## Contributing
 

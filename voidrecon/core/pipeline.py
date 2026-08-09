@@ -39,10 +39,16 @@ class Pipeline:
         *,
         phases: Iterable[Phase] | None = None,
         only: Iterable[str] | None = None,
+        monitor=None,
+        checkpoint=None,
+        completed: set[str] | None = None,
     ):
         self.ctx = ctx
         self.phases = list(phases) if phases else None
         self.only = list(only) if only else None
+        self.monitor = monitor
+        self.checkpoint = checkpoint
+        self.completed = set(completed or ())
         self._results: list[dict] = []
 
     def plan(self) -> list[Module]:
@@ -59,12 +65,27 @@ class Pipeline:
         modules = self.plan()
         if not modules:
             log.warning("no modules selected to run")
+        if self.monitor is not None:
+            self.monitor.set_plan(modules)
         current_phase = None
         for mod in modules:
             if mod.phase != current_phase:
                 current_phase = mod.phase
                 log.info("[bold cyan]=== phase: %s ===[/]", PHASE_NAMES[current_phase])
+                if self.monitor is not None:
+                    self.monitor.set_phase(PHASE_NAMES[current_phase])
+            if mod.name in self.completed:
+                # Resumed run: this module already ran in the checkpointed session.
+                if self.monitor is not None:
+                    self.monitor.end_module(mod.name, "skipped", 0.0, 0)
+                log.info("  %s already completed (resumed) — skipping", mod.name)
+                continue
             await self._run_one(mod)
+            if self.monitor is not None:
+                self.monitor.set_totals(self.ctx.store.counts())
+            if self.checkpoint is not None:
+                self.completed.add(mod.name)
+                self.checkpoint.save(self.ctx, self.completed)
 
         summary = {
             "run_id": self.ctx.run_id,
@@ -79,6 +100,8 @@ class Pipeline:
         started = time.time()
         before = len(self.ctx.store)
         status = "ok"
+        if self.monitor is not None:
+            self.monitor.start_module(mod.name)
         try:
             log.info("running [bold]%s[/] — %s", mod.name, mod.description or "")
             await mod.run(self.ctx)
@@ -103,3 +126,5 @@ class Pipeline:
             }
         )
         log.info("  %s finished in %ss (+%d assets)", mod.name, elapsed, gained)
+        if self.monitor is not None:
+            self.monitor.end_module(mod.name, "done" if status == "ok" else "error", elapsed, gained)

@@ -34,6 +34,11 @@ http:
   follow_redirects: true
   max_redirects: 5
 
+dns:
+  # Trusted resolvers used by all DNS modules. Empty/omitted uses the bundled list
+  # (sourced from CypherNova1337/dns-helix). Provide a list or a file path to override.
+  resolvers: []
+
 auth:
   # Authenticated-session material sent on every active request (crawler, fuzzer,
   # API discovery, analysis). Prefer the --header/--cookie/--bearer CLI flags.
@@ -63,6 +68,10 @@ modules:
   #   max_origins: 40                     # cap browser-driven origins
   # origin_ip:
   #   max_candidates: 100                 # cap IPs tested for origin exposure
+  # param_discovery:
+  #   wordlist: /path/to/params.txt       # parameter names (bundled default)
+  #   max_params: 250                     # candidates tested per endpoint
+  #   max_endpoints: 40                   # endpoints tested per run
 
 sources:
   # All optional. Prefer env vars, e.g. VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx

@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (live UX, resumability, param discovery, integrations)
+- **Live progress checklist:** a real-time terminal table of every module by phase
+  with status/elapsed/assets and running totals (`--no-live` to disable).
+- **Resumable runs:** per-module datastore checkpointing and `run --resume <id>`
+  to continue an interrupted engagement from the next unfinished module.
+- **Web UI:** `voidrecon serve` browses the SQLite datastore (runs/assets/findings)
+  via a read-only, localhost, stdlib HTTP server.
+- **param_discovery:** native reflected + accepted (Arjun-style) parameter
+  discovery; bundled wordlist from paramvoid; uses the `paramvoid` binary if present.
+- **vuln_hints:** classifies parameterised URLs into SQLi/XSS/SSRF/LFI/RCE/redirect/
+  SSTI/IDOR/debug candidate buckets (parameter sets distilled from GF_Patterns).
+- **Integrations:** bundled dns-helix resolver list used across all DNS modules;
+  `dns-helix`, `paramvoid`, and `sourcemapper` registered as orchestratable tools.
+- Asset/Finding gained `from_dict` for checkpoint/DB round-tripping.
+
 ### Added
 - **Authenticated sessions:** `--header`, `--cookie`, and `--bearer` flags (and an
   `auth` config section) attach credentials to every active request, so the

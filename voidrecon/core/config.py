@@ -52,6 +52,10 @@ DEFAULTS: dict[str, Any] = {
         "headers": {},   # e.g. {"Authorization": "Bearer <token>"}
         "cookies": {},   # e.g. {"session": "<value>"}
     },
+    "dns": {
+        # Trusted resolvers for all DNS modules. Empty -> bundled list (dns-helix).
+        "resolvers": [],
+    },
     "modules": {
         # Per-module enable flags and options are merged in here.
         "disabled": [],

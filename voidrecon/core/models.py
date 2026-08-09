@@ -120,6 +120,21 @@ class Asset:
             "last_seen": self.last_seen,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Asset":
+        return cls(
+            kind=AssetKind(data["kind"]),
+            value=data["value"],
+            sources=set(data.get("sources", [])),
+            tags=set(data.get("tags", [])),
+            attrs=dict(data.get("attrs", {})),
+            scope_state=ScopeState(data.get("scope_state", "unknown")),
+            confidence=Confidence(data.get("confidence", "likely")),
+            score=float(data.get("score", 0.0)),
+            first_seen=float(data.get("first_seen", _now())),
+            last_seen=float(data.get("last_seen", _now())),
+        )
+
 
 @dataclass
 class Finding:
@@ -153,3 +168,18 @@ class Finding:
             "tags": sorted(self.tags),
             "created": self.created,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Finding":
+        return cls(
+            title=data["title"],
+            severity=Severity(data.get("severity", "info")),
+            confidence=Confidence(data.get("confidence", "likely")),
+            asset=data.get("asset"),
+            module=data.get("module", ""),
+            description=data.get("description", ""),
+            evidence=dict(data.get("evidence", {})),
+            references=list(data.get("references", [])),
+            tags=set(data.get("tags", [])),
+            created=float(data.get("created", _now())),
+        )

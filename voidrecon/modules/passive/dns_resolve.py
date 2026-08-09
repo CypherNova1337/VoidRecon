@@ -43,9 +43,12 @@ class DnsResolve(Module):
         if not hosts:
             return
 
+        from voidrecon.utils.resolvers import apply_resolvers
+
         resolver = dns.asyncresolver.Resolver()
         resolver.lifetime = 5.0
         resolver.timeout = 5.0
+        apply_resolvers(resolver, ctx.config)
         sem = asyncio.Semaphore(int(ctx.config.get("opsec.max_concurrency", 20)))
 
         async def worker(asset):
