@@ -94,6 +94,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--concurrency", type=int, help="Max concurrent operations")
     run.add_argument("--timeout", type=float, help="Per-request timeout in seconds")
     run.add_argument("--no-verify-tls", action="store_true", help="Disable TLS verification (use with care)")
+    run.add_argument("-H", "--header", action="append", default=[],
+                     help="Auth/custom header sent on every active request, 'Name: value' (repeatable)")
+    run.add_argument("--cookie", action="append", default=[],
+                     help="Auth cookie 'name=value' sent on every active request (repeatable)")
+    run.add_argument("--bearer", help="Shorthand for --header 'Authorization: Bearer <token>'")
     run.add_argument("--formats", help="Report formats (comma): json,markdown,html")
     run.add_argument("--notify-webhook", help="Slack/Discord webhook URL for a completion summary")
     run.add_argument("--llm", action="store_true", help="Enable LLM analysis (requires provider config + key)")
@@ -222,6 +227,25 @@ def _config_overrides(args) -> dict:
         ov["reporting"] = {"formats": [f.strip() for f in args.formats.split(",")]}
     if getattr(args, "notify_webhook", None):
         ov["notify"] = {"webhook": args.notify_webhook}
+    # Authenticated-session material.
+    headers: dict = {}
+    for h in getattr(args, "header", None) or []:
+        if ":" in h:
+            k, v = h.split(":", 1)
+            headers[k.strip()] = v.strip()
+    if getattr(args, "bearer", None):
+        headers["Authorization"] = f"Bearer {args.bearer}"
+    cookies: dict = {}
+    for c in getattr(args, "cookie", None) or []:
+        if "=" in c:
+            k, v = c.split("=", 1)
+            cookies[k.strip()] = v.strip()
+    if headers or cookies:
+        ov["auth"] = {}
+        if headers:
+            ov["auth"]["headers"] = headers
+        if cookies:
+            ov["auth"]["cookies"] = cookies
     return ov
 
 

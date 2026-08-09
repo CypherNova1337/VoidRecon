@@ -34,6 +34,12 @@ http:
   follow_redirects: true
   max_redirects: 5
 
+auth:
+  # Authenticated-session material sent on every active request (crawler, fuzzer,
+  # API discovery, analysis). Prefer the --header/--cookie/--bearer CLI flags.
+  headers: {}   # e.g. {Authorization: "Bearer <token>", X-Api-Key: "<key>"}
+  cookies: {}   # e.g. {session: "<value>"}
+
 modules:
   disabled: []          # module names to never run (always wins over 'enabled')
   # Force-enable opt-in modules (port_scan, crawl, tech_cve) by name.
@@ -51,6 +57,12 @@ modules:
   #   wordlist: /path/to/subdomains.txt   # defaults to the bundled list
   #   max_candidates: 15000               # cap resolved candidates per apex
   #   permutations: true                  # also mutate known subdomains
+  # fuzz:
+  #   wordlist: /path/to/paths.txt        # content-discovery paths (bundled default)
+  # spa_crawl:
+  #   max_origins: 40                     # cap browser-driven origins
+  # origin_ip:
+  #   max_candidates: 100                 # cap IPs tested for origin exposure
 
 sources:
   # All optional. Prefer env vars, e.g. VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx

@@ -46,6 +46,12 @@ DEFAULTS: dict[str, Any] = {
         "follow_redirects": True,
         "max_redirects": 5,
     },
+    "auth": {
+        # Authenticated-session material sent on every active request. Lets the
+        # crawler, API discovery, fuzzer, etc. reach behind a login.
+        "headers": {},   # e.g. {"Authorization": "Bearer <token>"}
+        "cookies": {},   # e.g. {"session": "<value>"}
+    },
     "modules": {
         # Per-module enable flags and options are merged in here.
         "disabled": [],

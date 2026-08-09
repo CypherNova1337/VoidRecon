@@ -45,6 +45,7 @@ class RunContext:
         if self._http is None:
             opsec = self.config.section("opsec")
             httpc = self.config.section("http")
+            auth = self.config.section("auth")
             self._http = HttpClient(
                 user_agent=self.config.get("general.user_agent", "VoidRecon/0.1"),
                 rate=float(opsec.get("requests_per_second", 8.0)),
@@ -56,12 +57,19 @@ class RunContext:
                 follow_redirects=bool(httpc.get("follow_redirects", True)),
                 max_redirects=int(httpc.get("max_redirects", 5)),
                 rotate_user_agents=bool(opsec.get("rotate_user_agents", True)),
+                auth_headers=auth.get("headers") or None,
+                auth_cookies=auth.get("cookies") or None,
             )
         return self._http
 
     @property
     def active_allowed(self) -> bool:
         return bool(self.config.get("opsec.allow_active", False))
+
+    @property
+    def auth_headers(self) -> dict:
+        """Authenticated-session headers, for browser-driven modules to replay."""
+        return dict(self.config.get("auth.headers", {}) or {})
 
     def can_touch(self, value: str) -> bool:
         """True only if active mode is on AND the asset is positively in scope."""

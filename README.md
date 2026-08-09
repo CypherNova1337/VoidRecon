@@ -43,7 +43,7 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA), breach correlation (HaveIBeenPwned) | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler + SPA/XHR headless crawler, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, screenshotting | **Yes** — gated |
+| **content** | Native crawler + SPA/XHR headless crawler, directory/file fuzzing (soft-404 aware), deep tech fingerprinting, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, screenshotting | **Yes** — gated |
 | **vuln** | Native version→CVE correlation (auto-refreshable dataset), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
@@ -169,6 +169,19 @@ export VOIDRECON_SOURCES_HACKERONE_USERNAME=xxx        # scope import (with toke
 export VOIDRECON_SOURCES_HACKERONE_TOKEN=xxx
 ```
 
+### Authenticated sessions
+
+Reach behind a login so the crawler, fuzzer, API discovery, and analysis modules
+test authenticated surface. Credentials attach to every active request (and the
+SPA crawler replays headers in the browser):
+
+```bash
+voidrecon run app.example.com --active \
+  --bearer "eyJhbGci..." \
+  --header "X-Api-Key: abc123" \
+  --cookie "session=deadbeef"
+```
+
 ### Completion notifications
 
 Point a Slack or Discord webhook at a long run and VoidRecon pings you when it
@@ -254,11 +267,21 @@ an auto-refreshable dataset, security-header/CORS/cookie analysis, screenshottin
 SQLite persistence, run-to-run diffing, trend dashboards, and completion webhooks.
 Still growing:
 
-- Expanded/curated CVE signature dataset (bundled feed)
-- Authenticated-session crawling and richer active content-discovery (dir/param fuzzing)
-- Deeper technology fingerprint database (Wappalyzer-scale)
-- Origin-IP discovery behind WAFs/CDNs
+- Expanded/curated CVE + fingerprint datasets (bundled feeds)
+- Reflected-parameter and injection-point discovery
 - Distributed / resumable runs for very large engagements
+- Web UI over the SQLite datastore
+
+## Development
+
+```bash
+make setup    # editable install with dev + full extras (or: ./scripts/setup.sh)
+make test     # pytest
+make lint     # ruff
+make run      # CLI help
+```
+
+CI (GitHub Actions) runs ruff + pytest on Python 3.10–3.12 for every push and PR.
 
 ## Contributing
 

@@ -80,7 +80,10 @@ class SpaCrawl(Module):
 
     async def _visit(self, ctx: RunContext, browser, url: str, timeout: float) -> int:
         captured: set[str] = set()
-        context = await browser.new_context(ignore_https_errors=True)
+        context = await browser.new_context(
+            ignore_https_errors=True,
+            extra_http_headers=ctx.auth_headers or None,
+        )
         page = await context.new_page()
 
         def on_request(request):
