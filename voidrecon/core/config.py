@@ -59,6 +59,8 @@ DEFAULTS: dict[str, Any] = {
         "shodan_api_key": None,
         "securitytrails_api_key": None,
         "virustotal_api_key": None,
+        "censys_api_id": None,
+        "censys_api_secret": None,
     },
     "intel": {
         "llm_enabled": False,
@@ -70,6 +72,11 @@ DEFAULTS: dict[str, Any] = {
     },
     "reporting": {
         "formats": ["json", "markdown", "html"],
+    },
+    "notify": {
+        # Optional completion notification to a Slack or Discord webhook.
+        "webhook": None,            # prefer env: VOIDRECON_NOTIFY_WEBHOOK
+        "min_severity": "high",     # only ping if a finding at/above this severity exists
     },
 }
 

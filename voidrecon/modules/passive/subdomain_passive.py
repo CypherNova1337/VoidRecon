@@ -50,6 +50,7 @@ class PassiveSubdomains(Module):
             self._urlscan(ctx, apex),
             self._securitytrails(ctx, apex),
             self._virustotal(ctx, apex),
+            self._censys(ctx, apex),
             self._subfinder(ctx, apex),
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -144,6 +145,38 @@ class PassiveSubdomains(Module):
                 host = row.get("id")
                 if host:
                     out.add(net.normalize_host(host))
+        return out
+
+    async def _censys(self, ctx: RunContext, apex: str) -> set[str]:
+        api_id = ctx.source_key("censys_api_id")
+        api_secret = ctx.source_key("censys_api_secret")
+        if not (api_id and api_secret):
+            return set()
+        out: set[str] = set()
+        cursor = None
+        for _ in range(5):  # bounded pagination
+            params = {"q": apex, "per_page": 100}
+            if cursor:
+                params["cursor"] = cursor
+            resp = await ctx.http.get(
+                "https://search.censys.io/api/v2/hosts/search",
+                params=params, auth=(api_id, api_secret),
+            )
+            if resp is None or resp.status_code >= 400:
+                break
+            try:
+                data = resp.json()
+            except Exception:
+                break
+            result = data.get("result", {})
+            for hit in result.get("hits", []) or []:
+                for name in hit.get("dns", {}).get("names", []) or hit.get("names", []) or []:
+                    out.add(net.normalize_host(name))
+                for cert in hit.get("names", []) or []:
+                    out.add(net.normalize_host(cert))
+            cursor = (result.get("links", {}) or {}).get("next")
+            if not cursor:
+                break
         return out
 
     # ---- hybrid: external tool -------------------------------------------

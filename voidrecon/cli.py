@@ -36,7 +36,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from voidrecon.core import history
+from voidrecon.core import history, notify
 from voidrecon.core.config import Config
 from voidrecon.core.context import RunContext
 from voidrecon.core.logging import setup_logging
@@ -95,6 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=float, help="Per-request timeout in seconds")
     run.add_argument("--no-verify-tls", action="store_true", help="Disable TLS verification (use with care)")
     run.add_argument("--formats", help="Report formats (comma): json,markdown,html")
+    run.add_argument("--notify-webhook", help="Slack/Discord webhook URL for a completion summary")
     run.add_argument("--llm", action="store_true", help="Enable LLM analysis (requires provider config + key)")
     run.add_argument("--llm-provider", help="openai | anthropic | ollama | openai_compatible")
     run.add_argument("--llm-model", help="Model name for the selected provider")
@@ -209,6 +210,8 @@ def _config_overrides(args) -> dict:
         ov["modules"]["disabled"] = list(args.disable)
     if getattr(args, "formats", None):
         ov["reporting"] = {"formats": [f.strip() for f in args.formats.split(",")]}
+    if getattr(args, "notify_webhook", None):
+        ov["notify"] = {"webhook": args.notify_webhook}
     return ov
 
 
@@ -327,11 +330,11 @@ async def _run(args) -> int:
     pipeline = Pipeline(ctx, phases=phases, only=only)
     try:
         summary = await pipeline.run()
+        reporter = Reporter(ctx, summary)
+        written = reporter.write_all(cfg.get("reporting.formats", ["json", "markdown", "html"]))
+        await notify.send(ctx, summary)
     finally:
         await ctx.aclose()
-
-    reporter = Reporter(ctx, summary)
-    written = reporter.write_all(cfg.get("reporting.formats", ["json", "markdown", "html"]))
 
     counts = ctx.store.counts()
     log.info("[bold green]done[/] in %ss — %s", summary["elapsed"],

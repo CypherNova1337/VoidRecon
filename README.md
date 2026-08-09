@@ -40,11 +40,11 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
 | **scope** | Org footprint: ASN + netblock mapping from seed domains (shared-CDN ASNs are recognised and not mis-claimed) | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS, web archives, GitHub dorking, cloud-bucket discovery | No (third-party data) |
-| **resolve** | DNS resolution → live IPs + CNAME chains (feeds takeover detection) | No (recursive resolvers) |
+| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA) | No (third-party data) |
+| **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler (links/forms/params, robots & sitemap mining), JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (local dataset), template scanning, exposed-app flags | **Yes** — gated |
+| **content** | Native crawler (links/forms/params, robots & sitemap mining), JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting, API/spec/GraphQL discovery, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (local dataset), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
@@ -157,8 +157,22 @@ export VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx          # enables GitHub dorking
 export VOIDRECON_SOURCES_SECURITYTRAILS_API_KEY=xxx    # enriches passive DNS
 export VOIDRECON_SOURCES_VIRUSTOTAL_API_KEY=xxx
 export VOIDRECON_SOURCES_SHODAN_API_KEY=xxx            # favicon-hash pivoting
+export VOIDRECON_SOURCES_CENSYS_API_ID=xxx             # extra passive subdomain source
+export VOIDRECON_SOURCES_CENSYS_API_SECRET=xxx
 export VOIDRECON_SOURCES_HACKERONE_USERNAME=xxx        # scope import (with token)
 export VOIDRECON_SOURCES_HACKERONE_TOKEN=xxx
+```
+
+### Completion notifications
+
+Point a Slack or Discord webhook at a long run and VoidRecon pings you when it
+finishes, with the headline numbers and top findings (only if something at or
+above `notify.min_severity` turned up):
+
+```bash
+voidrecon run example.com --aggressive --yes \
+  --notify-webhook https://hooks.slack.com/services/XXX/YYY/ZZZ
+# or set VOIDRECON_NOTIFY_WEBHOOK in the environment
 ```
 
 Everything works without any keys — configured sources simply add depth.
@@ -208,7 +222,7 @@ voidrecon/
 ├── intel/                 # scoring, correlation, provider-agnostic LLM layer
 ├── modules/               # auto-discovered recon modules (passive/active/content/vuln)
 ├── reporting/             # JSON / Markdown / HTML report generation
-├── data/                  # bundled datasets (CVE signatures)
+├── data/                  # bundled datasets (CVE signatures, subdomain wordlist)
 └── utils/                 # domain/IP parsing, secret patterns, hashing, version compare
 configs/default.yaml       # default configuration
 tests/                     # pytest suite
@@ -225,15 +239,19 @@ hundreds of hosts at a glance. Install the backend with `pip install -e ".[scree
 ## Roadmap
 
 VoidRecon now ships with the complete engine plus deep passive/OSINT, org
-footprinting, active probing & port discovery, a native crawler, JS secret/endpoint
-mining, favicon-hash & tracking-ID pivoting, cloud-bucket discovery, native
-CVE correlation, screenshotting, and run-to-run diffing. Still growing:
+footprinting, DNS/email-security analysis, wildcard-aware subdomain brute-force &
+permutations, reverse-DNS, active probing & port discovery, a native crawler,
+JS secret/endpoint mining, API/spec/GraphQL discovery, favicon-hash & tracking-ID
+pivoting, cloud-bucket discovery, native CVE correlation, security-header/CORS/
+cookie analysis, screenshotting, run-to-run diffing, and completion webhooks.
+Still growing:
 
 - Expanded CVE signature dataset and auto-refresh from public feeds
 - Headless-browser-aware (XHR/SPA) crawling in the native crawler
-- Censys pivoting alongside Shodan
+- Censys favicon pivoting alongside Shodan
 - Passive credential-leak correlation
 - Historical trend dashboards across many runs
+- SQLite persistence for very large engagements
 
 ## Contributing
 

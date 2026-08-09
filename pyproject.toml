@@ -67,7 +67,7 @@ where = ["."]
 include = ["voidrecon*"]
 
 [tool.setuptools.package-data]
-voidrecon = ["reporting/templates/*.html", "reporting/templates/*.md", "data/*.json"]
+voidrecon = ["reporting/templates/*.html", "reporting/templates/*.md", "data/*.json", "data/*.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
