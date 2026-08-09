@@ -36,7 +36,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from voidrecon.core import history, notify
+from voidrecon.core import db, history, notify
 from voidrecon.core.config import Config
 from voidrecon.core.context import RunContext
 from voidrecon.core.logging import setup_logging
@@ -113,6 +113,16 @@ def _build_parser() -> argparse.ArgumentParser:
     df.add_argument("paths", nargs="*", help="Two run dirs/JSON files, or a target slug (uses latest two runs)")
     df.add_argument("-d", "--dir", default="runs", help="Base output directory to search (default: runs)")
     df.add_argument("--json", action="store_true", help="Emit the diff as JSON")
+
+    # dashboard -----------------------------------------------------------
+    dash = sub.add_parser("dashboard", help="Build an HTML trend dashboard across runs of a target")
+    dash.add_argument("target", nargs="?", help="Target slug to filter runs (default: all)")
+    dash.add_argument("-d", "--dir", default="runs", help="Base output directory (default: runs)")
+    dash.add_argument("-o", "--output", help="Output HTML path (default: <dir>/dashboard.html)")
+
+    # update-cve ----------------------------------------------------------
+    uc = sub.add_parser("update-cve", help="Fetch/merge an external CVE signature dataset")
+    uc.add_argument("url", help="URL to a JSON dataset ({\"signatures\": [...]})")
 
     # scope ---------------------------------------------------------------
     sc = sub.add_parser("scope", help="Parse and display effective scope without running")
@@ -336,6 +346,11 @@ async def _run(args) -> int:
     finally:
         await ctx.aclose()
 
+    if cfg.get("general.sqlite", True):
+        db_path = Path(cfg.get("general.output_dir", "runs")) / "voidrecon.db"
+        if db.persist_run(db_path, ctx, summary):
+            log.info("persisted run to %s", db_path)
+
     counts = ctx.store.counts()
     log.info("[bold green]done[/] in %ss — %s", summary["elapsed"],
              ", ".join(f"{v} {k}" for k, v in counts.items() if v))
@@ -417,6 +432,58 @@ def _cmd_diff(args) -> int:
     return 0
 
 
+def _cmd_dashboard(args) -> int:
+    from voidrecon.reporting.dashboard import build_dashboard
+
+    runs = history.find_runs(args.dir, args.target)
+    if not runs:
+        print(f"no runs found in {args.dir}" + (f" for '{args.target}'" if args.target else ""), file=sys.stderr)
+        return 2
+    out = Path(args.output) if args.output else Path(args.dir) / "dashboard.html"
+    out.write_text(build_dashboard(runs, args.target), encoding="utf-8")
+    print(f"dashboard written to: {out} ({len(runs)} runs)")
+    return 0
+
+
+def _cmd_update_cve(args) -> int:
+    import asyncio
+    import json
+
+    import httpx
+
+    from voidrecon.core.paths import user_cve_dataset
+
+    async def fetch() -> dict | None:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            try:
+                resp = await client.get(args.url)
+            except Exception as exc:  # noqa: BLE001
+                print(f"error: could not fetch {args.url}: {exc}", file=sys.stderr)
+                return None
+        if resp.status_code >= 400:
+            print(f"error: {args.url} returned {resp.status_code}", file=sys.stderr)
+            return None
+        try:
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: response is not valid JSON: {exc}", file=sys.stderr)
+            return None
+
+    data = asyncio.run(fetch())
+    if data is None:
+        return 1
+    sigs = data.get("signatures")
+    if not isinstance(sigs, list) or not sigs:
+        print("error: dataset must be a JSON object with a non-empty 'signatures' array", file=sys.stderr)
+        return 2
+    dest = user_cve_dataset()
+    dest.write_text(json.dumps({"signatures": sigs}, indent=2), encoding="utf-8")
+    total_cves = sum(len(s.get("cves", [])) for s in sigs)
+    print(f"saved {len(sigs)} signature group(s) / {total_cves} CVEs to {dest}")
+    print("cve_match will merge these on the next run.")
+    return 0
+
+
 def _cmd_scope(args) -> int:
     scope = _build_scope(args, wildcard_apex=True)
     print("Seeds:      ", ", ".join(scope.seeds) or "—")
@@ -441,6 +508,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_modules(args)
     if args.command == "diff":
         return _cmd_diff(args)
+    if args.command == "dashboard":
+        return _cmd_dashboard(args)
+    if args.command == "update-cve":
+        return _cmd_update_cve(args)
     if args.command == "scope":
         return _cmd_scope(args)
     return 1

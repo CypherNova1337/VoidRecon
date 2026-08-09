@@ -81,6 +81,10 @@ class HttpClient:
             except httpx.HTTPError as exc:
                 log.debug("http error: %s %s (%s)", method, url, exc)
                 return None
+            except (ValueError, TypeError) as exc:
+                # Malformed URL / unsupported scheme must never crash a module.
+                log.debug("bad request skipped: %s %s (%s)", method, url, exc)
+                return None
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response | None:
         return await self.request("GET", url, **kwargs)

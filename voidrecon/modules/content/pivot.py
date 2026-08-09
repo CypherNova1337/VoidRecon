@@ -73,11 +73,16 @@ class FingerprintPivot(Module):
         self.log.info("collected %d unique favicon hash(es) across %d hosts", len(hashes), len(targets))
 
         shodan_key = ctx.source_key("shodan_api_key")
+        censys_id = ctx.source_key("censys_api_id")
+        censys_secret = ctx.source_key("censys_api_secret")
         if shodan_key:
             for fh in hashes:
                 await self._shodan_pivot(ctx, shodan_key, fh)
-        elif hashes:
-            self.log.info("set VOIDRECON_SOURCES_SHODAN_API_KEY to pivot favicon hashes across the internet")
+        if censys_id and censys_secret:
+            for fh in hashes:
+                await self._censys_pivot(ctx, censys_id, censys_secret, fh)
+        if hashes and not (shodan_key or (censys_id and censys_secret)):
+            self.log.info("set a Shodan or Censys API key to pivot favicon hashes across the internet")
 
     async def _fingerprint(self, ctx: RunContext, asset) -> None:
         page = asset.attrs["http_url"]
@@ -96,7 +101,12 @@ class FingerprintPivot(Module):
         if html:
             m = _ICON_RE.search(html)
             if m:
-                icon_url = urljoin(page, m.group(1))
+                candidate = urljoin(page, m.group(1).strip())
+                # Ignore inline data URIs and anything that isn't a real http(s) URL.
+                if candidate.lower().startswith(("http://", "https://")):
+                    icon_url = candidate
+        if not icon_url.lower().startswith(("http://", "https://")):
+            return
         resp = await ctx.http.get(icon_url)
         if resp is not None and resp.status_code == 200 and resp.content:
             ctype = resp.headers.get("content-type", "")
@@ -135,3 +145,34 @@ class FingerprintPivot(Module):
                         a.tags.add("favicon-pivot")
         if added:
             self.log.info("favicon hash %s -> %d hosts via Shodan", fh, added)
+
+    async def _censys_pivot(self, ctx: RunContext, api_id: str, api_secret: str, fh: int) -> None:
+        resp = await ctx.http.get(
+            "https://search.censys.io/api/v2/hosts/search",
+            params={"q": f"services.http.response.favicons.hash_shodan: {fh}", "per_page": 50},
+            auth=(api_id, api_secret),
+        )
+        if resp is None or resp.status_code >= 400:
+            return
+        try:
+            hits = resp.json().get("result", {}).get("hits", []) or []
+        except Exception:
+            return
+        added = 0
+        for hit in hits:
+            ip = hit.get("ip")
+            if ip:
+                a = ctx.add_asset(AssetKind.IP, ip, source=self.name,
+                                  confidence=Confidence.TENTATIVE, via="favicon_pivot", favicon_hash=fh)
+                if a:
+                    a.tags.add("favicon-pivot")
+                    added += 1
+            for name in hit.get("dns", {}).get("names", []) or []:
+                host = net.normalize_host(name)
+                if host and net.is_domain(host):
+                    a = ctx.add_asset(AssetKind.SUBDOMAIN, host, source=self.name,
+                                      confidence=Confidence.TENTATIVE, via="favicon_pivot")
+                    if a:
+                        a.tags.add("favicon-pivot")
+        if added:
+            self.log.info("favicon hash %s -> %d hosts via Censys", fh, added)

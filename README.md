@@ -40,11 +40,11 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
 | **scope** | Org footprint: ASN + netblock mapping from seed domains (shared-CDN ASNs are recognised and not mis-claimed) | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA) | No (third-party data) |
+| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA), breach correlation (HaveIBeenPwned) | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler (links/forms/params, robots & sitemap mining), JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting, API/spec/GraphQL discovery, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (local dataset), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **content** | Native crawler + SPA/XHR headless crawler, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (auto-refreshable dataset), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
@@ -90,6 +90,12 @@ voidrecon run --url https://hackerone.com/example --import-scope
 # Compare the two most recent runs for a target (what changed?)
 voidrecon diff example.com
 
+# Build an HTML trend dashboard across all runs of a target
+voidrecon dashboard example.com
+
+# Refresh the local CVE signature dataset from an external feed
+voidrecon update-cve https://example.com/voidrecon-cve.json
+
 # Inspect available modules / verify how a host classifies against your scope
 voidrecon modules
 voidrecon scope example.com --include "*.example.com" --check dev.example.com
@@ -100,7 +106,7 @@ Scope import uses the platform API when credentials are present (HackerOne:
 falls back to best-effort parsing otherwise. It never probes the target and never
 widens scope silently — it prints exactly what it imported.
 
-Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table.
+Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table and screenshot gallery. Every run is also appended to a shared SQLite database (`runs/voidrecon.db`) that powers `voidrecon diff` and `voidrecon dashboard`.
 
 ### Aggressive mode
 
@@ -238,20 +244,21 @@ hundreds of hosts at a glance. Install the backend with `pip install -e ".[scree
 
 ## Roadmap
 
-VoidRecon now ships with the complete engine plus deep passive/OSINT, org
-footprinting, DNS/email-security analysis, wildcard-aware subdomain brute-force &
-permutations, reverse-DNS, active probing & port discovery, a native crawler,
-JS secret/endpoint mining, API/spec/GraphQL discovery, favicon-hash & tracking-ID
-pivoting, cloud-bucket discovery, native CVE correlation, security-header/CORS/
-cookie analysis, screenshotting, run-to-run diffing, and completion webhooks.
+VoidRecon ships with the complete engine plus deep passive/OSINT, org
+footprinting, DNS/email-security analysis, breach correlation, wildcard-aware
+subdomain brute-force & permutations, reverse-DNS, active probing & port
+discovery, native + SPA/XHR crawling, JS secret/endpoint mining, API/spec/GraphQL
+discovery, email harvesting, favicon-hash & tracking-ID pivoting (Shodan +
+Censys), WAF/CDN detection, cloud-bucket discovery, native CVE correlation with
+an auto-refreshable dataset, security-header/CORS/cookie analysis, screenshotting,
+SQLite persistence, run-to-run diffing, trend dashboards, and completion webhooks.
 Still growing:
 
-- Expanded CVE signature dataset and auto-refresh from public feeds
-- Headless-browser-aware (XHR/SPA) crawling in the native crawler
-- Censys favicon pivoting alongside Shodan
-- Passive credential-leak correlation
-- Historical trend dashboards across many runs
-- SQLite persistence for very large engagements
+- Expanded/curated CVE signature dataset (bundled feed)
+- Authenticated-session crawling and richer active content-discovery (dir/param fuzzing)
+- Deeper technology fingerprint database (Wappalyzer-scale)
+- Origin-IP discovery behind WAFs/CDNs
+- Distributed / resumable runs for very large engagements
 
 ## Contributing
 

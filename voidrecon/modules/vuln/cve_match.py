@@ -39,6 +39,25 @@ _HEADER_PRODUCTS = {
 }
 
 
+def merge_signatures(base: list[dict], extra: list[dict]) -> list[dict]:
+    """Merge two signature lists by product name; ``extra`` wins on CVE-id clashes."""
+    by_product: dict[str, dict] = {s.get("product", "").lower(): dict(s) for s in base}
+    for sig in extra:
+        key = sig.get("product", "").lower()
+        if not key:
+            continue
+        if key not in by_product:
+            by_product[key] = dict(sig)
+            continue
+        merged = by_product[key]
+        merged["match"] = sorted(set(merged.get("match", [])) | set(sig.get("match", [])))
+        cves = {c.get("id"): c for c in merged.get("cves", [])}
+        for cve in sig.get("cves", []):
+            cves[cve.get("id")] = cve  # user/extra wins
+        merged["cves"] = list(cves.values())
+    return list(by_product.values())
+
+
 @register
 class CveMatch(Module):
     name = "cve_match"
@@ -48,14 +67,26 @@ class CveMatch(Module):
     depends_on = ("http_probe",)
 
     def _load(self) -> list[dict]:
-        if _res_files is None:
-            return []
+        signatures: list[dict] = []
+        # Bundled dataset.
+        if _res_files is not None:
+            try:
+                raw = _res_files("voidrecon.data").joinpath("cve_signatures.json").read_text(encoding="utf-8")
+                signatures = json.loads(raw).get("signatures", [])
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("could not load bundled CVE dataset: %s", exc)
+        # User override / auto-refreshed dataset (merged by product; user wins).
         try:
-            raw = _res_files("voidrecon.data").joinpath("cve_signatures.json").read_text(encoding="utf-8")
-            return json.loads(raw).get("signatures", [])
+            from voidrecon.core.paths import user_cve_dataset
+
+            user_path = user_cve_dataset()
+            if user_path.exists():
+                user_sigs = json.loads(user_path.read_text(encoding="utf-8")).get("signatures", [])
+                signatures = merge_signatures(signatures, user_sigs)
+                self.log.info("merged %d user CVE signature group(s) from %s", len(user_sigs), user_path)
         except Exception as exc:  # noqa: BLE001
-            self.log.warning("could not load CVE dataset: %s", exc)
-            return []
+            self.log.debug("no user CVE dataset merged: %s", exc)
+        return signatures
 
     async def run(self, ctx: RunContext) -> None:
         signatures = self._load()

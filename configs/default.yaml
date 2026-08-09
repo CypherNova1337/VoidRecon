@@ -10,6 +10,8 @@ general:
   user_agent: "VoidRecon/0.1 (+https://github.com/CypherNova1337/VoidRecon)"
   # When true, a bare apex in scope (example.com) also covers its subdomains.
   wildcard_apex: true
+  # Append each run to a shared SQLite DB (<output_dir>/voidrecon.db) for trends.
+  sqlite: true
 
 opsec:
   # Passive recon is always allowed. Active interaction with the target is OFF

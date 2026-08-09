@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
         "log_level": "info",
         "user_agent": "VoidRecon/0.1 (+https://github.com/CypherNova1337/VoidRecon)",
         "wildcard_apex": True,   # a bare apex in scope covers subdomains
+        "sqlite": True,          # append each run to <output_base>/voidrecon.db
     },
     "opsec": {
         # Passive is always allowed. Active interaction is off unless explicitly
