@@ -7,6 +7,19 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (usability, the Advisor, injection refinements)
+- **The Advisor:** an always-on, heuristic "what to do next" planner — ranks
+  findings into concrete next steps with the assets involved and ready-to-run
+  commands; prints after every run and headlines the JSON/Markdown/HTML report.
+- **Profiles:** `--profile passive|quick|standard|deep|stealth` — one word instead
+  of a pile of flags.
+- **Interactive wizard:** `voidrecon wizard` guides target/intensity/AI choices.
+- **`--ai` flag:** turns on LLM analysis with env/config provider settings.
+- **sqli_probe:** error-based + boolean-based SQL-injection confirmation.
+- **ssrf_probe:** blind SSRF via OOB callbacks (`oob.domain`) + in-band signals.
+- **prototype_pollution:** real-browser client-side prototype-pollution detection.
+- **Web UI:** global `/findings` view with severity filter and search.
+
 ### Added (auth automation, distributed workers, injection probing)
 - **Authenticated login automation:** scripted headless-browser login
   (`--login-url/--login-user/--login-pass` or `auth.login`) captures the session

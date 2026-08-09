@@ -62,6 +62,9 @@ class Reporter:
     def _llm(self) -> dict | None:
         return getattr(self.store, "llm_analysis", None)
 
+    def _advice(self) -> list:
+        return getattr(self.store, "advice", []) or []
+
     # ---- JSON -------------------------------------------------------------
     def _write_json(self, path: Path) -> Path:
         payload = {
@@ -117,6 +120,17 @@ class Reporter:
                     checks = ", ".join(t.get("suggested_checks", []) or [])
                     lines.append(f"- **{t.get('asset','?')}** — {t.get('why','')}" + (f" _(checks: {checks})_" if checks else ""))
                 lines.append("")
+
+        advice = self._advice()
+        if advice:
+            lines.append("## Recommended next steps")
+            for i, rec in enumerate(advice, 1):
+                lines.append(f"{i}. **{rec['action']}** — {rec['why']}")
+                if rec.get("targets"):
+                    lines.append(f"   - Targets: {', '.join(str(t) for t in rec['targets'][:8])}")
+                if rec.get("command"):
+                    lines.append(f"   - `{rec['command']}`")
+            lines.append("")
 
         lines.append("## Findings")
         findings = self._findings_sorted()
@@ -210,6 +224,18 @@ class Reporter:
             )
             gallery_html = f'<section><h2>Visual triage ({len(shots)})</h2><div class="gallery">{cells}</div></section>'
 
+        advice = self._advice()
+        advice_html = ""
+        if advice:
+            items = ""
+            for rec in advice:
+                tgt = (f'<div class="meta">Targets: {esc(", ".join(str(t) for t in rec["targets"][:8]))}</div>'
+                       if rec.get("targets") else "")
+                cmd = f'<div class="refs"><code>{esc(rec["command"])}</code></div>' if rec.get("command") else ""
+                items += (f'<div class="finding"><strong>{esc(rec["action"])}</strong>'
+                          f'<p>{esc(rec["why"])}</p>{tgt}{cmd}</div>')
+            advice_html = f'<section><h2>Recommended next steps</h2>{items}</section>'
+
         llm_html = ""
         if llm:
             targets = "".join(
@@ -266,6 +292,7 @@ class Reporter:
 </header>
 <main>
   <section><h2>Attack surface</h2><div class="cards">{cards}</div></section>
+  {advice_html}
   {llm_html}
   <section><h2>Findings</h2>{findings_html}</section>
   {gallery_html}

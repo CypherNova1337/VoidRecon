@@ -39,6 +39,11 @@ dns:
   # (sourced from CypherNova1337/dns-helix). Provide a list or a file path to override.
   resolvers: []
 
+oob:
+  # Out-of-band domain you control (e.g. an interactsh domain) for blind SSRF
+  # testing. VoidRecon injects unique callbacks; watch your listener for hits.
+  domain: null
+
 auth:
   # Authenticated-session material sent on every active request (crawler, fuzzer,
   # API discovery, analysis). Prefer the --header/--cookie/--bearer CLI flags.

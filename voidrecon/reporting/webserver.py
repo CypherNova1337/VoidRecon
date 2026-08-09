@@ -59,11 +59,13 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            qs = parse_qs(parsed.query)
             if parsed.path == "/":
                 body = self._index()
             elif parsed.path == "/run":
-                run_id = parse_qs(parsed.query).get("id", [""])[0]
-                body = self._run(run_id)
+                body = self._run(qs.get("id", [""])[0], sev=qs.get("sev", [""])[0])
+            elif parsed.path == "/findings":
+                body = self._findings(sev=qs.get("sev", [""])[0], q=qs.get("q", [""])[0])
             else:
                 self.send_error(404)
                 return
@@ -92,14 +94,56 @@ class _Handler(BaseHTTPRequestHandler):
             f"<td>{_esc(r['asset_count'])}</td><td>{_esc(r['finding_count'])}</td></tr>"
             for r in rows
         )
-        return ("<h2>Runs</h2><table><thead><tr><th>Run</th><th>Target</th><th>When</th>"
+        return ("<p><a href='/findings'>All findings →</a></p>"
+                "<h2>Runs</h2><table><thead><tr><th>Run</th><th>Target</th><th>When</th>"
                 f"<th>Assets</th><th>Findings</th></tr></thead><tbody>{trs}</tbody></table>")
 
-    def _run(self, run_id: str) -> str:
+    def _sev_filter_bar(self, base: str, current: str) -> str:
+        links = [f"<a href='{base}'>all</a>"]
+        for s in ("critical", "high", "medium", "low", "info"):
+            style = "font-weight:700" if s == current else ""
+            links.append(f"<a href='{base}{'&' if '?' in base else '?'}sev={s}' style='{style}'>{s}</a>")
+        return "<p>Severity: " + " · ".join(links) + "</p>"
+
+    def _findings(self, sev: str = "", q: str = "") -> str:
         conn = self._conn()
-        findings = conn.execute(
-            "SELECT severity, title, module, asset FROM findings WHERE run_id=?", (run_id,)
-        ).fetchall()
+        sql = ("SELECT f.severity, f.title, f.module, f.asset, f.run_id, r.target "
+               "FROM findings f LEFT JOIN runs r ON r.run_id=f.run_id WHERE 1=1")
+        params: list = []
+        if sev:
+            sql += " AND f.severity=?"
+            params.append(sev)
+        if q:
+            sql += " AND (f.title LIKE ? OR f.asset LIKE ?)"
+            params += [f"%{q}%", f"%{q}%"]
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        rows = sorted(rows, key=lambda r: -_SEV_RANK.get(r["severity"], 0))[:1000]
+        trs = "".join(
+            f"<tr><td><span class='badge' style='background:{_SEV_COLOR.get(r['severity'],'#546e7a')}'>"
+            f"{_esc(r['severity'].upper())}</span></td><td>{_esc(r['title'])}</td>"
+            f"<td>{_esc(r['module'])}</td><td><code>{_esc(r['asset'])}</code></td>"
+            f"<td><a href='/run?id={_esc(r['run_id'])}'>{_esc(r['target'])}</a></td></tr>"
+            for r in rows
+        ) or "<tr><td colspan=5>No matching findings.</td></tr>"
+        search = (f"<form method=get action=/findings><input name=q value='{_esc(q)}' "
+                  f"placeholder='search title/asset' style='padding:6px'>"
+                  f"<button style='padding:6px'>Search</button></form>")
+        return (f"<p><a href='/'>&larr; runs</a></p><h2>All findings</h2>{search}"
+                + self._sev_filter_bar('/findings', sev)
+                + f"<table><thead><tr><th>Sev</th><th>Title</th><th>Module</th><th>Asset</th>"
+                  f"<th>Run</th></tr></thead><tbody>{trs}</tbody></table>")
+
+    def _run(self, run_id: str, sev: str = "") -> str:
+        conn = self._conn()
+        if sev:
+            findings = conn.execute(
+                "SELECT severity, title, module, asset FROM findings WHERE run_id=? AND severity=?",
+                (run_id, sev)).fetchall()
+        else:
+            findings = conn.execute(
+                "SELECT severity, title, module, asset FROM findings WHERE run_id=?", (run_id,)
+            ).fetchall()
         assets = conn.execute(
             "SELECT kind, value, score, scope FROM assets WHERE run_id=? ORDER BY score DESC LIMIT 100",
             (run_id,),
@@ -118,7 +162,8 @@ class _Handler(BaseHTTPRequestHandler):
             for r in assets
         ) or "<tr><td colspan=4>No assets.</td></tr>"
         return (f"<p><a href='/'>&larr; all runs</a></p><h2>Findings — {_esc(run_id)}</h2>"
-                f"<table><thead><tr><th>Sev</th><th>Title</th><th>Module</th><th>Asset</th></tr></thead>"
+                + self._sev_filter_bar(f"/run?id={_esc(run_id)}", sev)
+                + f"<table><thead><tr><th>Sev</th><th>Title</th><th>Module</th><th>Asset</th></tr></thead>"
                 f"<tbody>{f_rows}</tbody></table>"
                 f"<h2>Top assets</h2><table><thead><tr><th>Score</th><th>Kind</th><th>Value</th>"
                 f"<th>Scope</th></tr></thead><tbody>{a_rows}</tbody></table>")

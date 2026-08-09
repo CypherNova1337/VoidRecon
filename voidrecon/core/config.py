@@ -60,6 +60,11 @@ DEFAULTS: dict[str, Any] = {
         # Trusted resolvers for all DNS modules. Empty -> bundled list (dns-helix).
         "resolvers": [],
     },
+    "oob": {
+        # Out-of-band interaction domain (e.g. an interactsh domain you control).
+        # Enables blind SSRF testing: VoidRecon injects callbacks; you watch the listener.
+        "domain": None,
+    },
     "modules": {
         # Per-module enable flags and options are merged in here.
         "disabled": [],

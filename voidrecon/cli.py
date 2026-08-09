@@ -51,6 +51,31 @@ from voidrecon.version import __codename__, __version__
 
 _PHASE_BY_NAME = {v: k for k, v in PHASE_NAMES.items()}
 
+# One-word intensity presets (applied under explicit CLI flags, which still win).
+_HEAVY = ["dns_brute", "fuzz", "vhost", "sourcemaps", "param_discovery", "spa_crawl",
+          "screenshot", "cms_enum", "graphql", "injection_probe", "open_redirect",
+          "cloud_assets", "wayback", "reverse_ip"]
+PROFILES = {
+    "passive": {"opsec": {"allow_active": False}},
+    "quick": {"opsec": {"allow_active": True}, "modules": {"disabled": list(_HEAVY)}},
+    "standard": {"opsec": {"allow_active": True}},
+    "deep": {"opsec": {"allow_active": True}, "modules": {"enabled": ["*"]}},
+    "stealth": {"opsec": {"allow_active": True, "requests_per_second": 2.0, "jitter": 0.6,
+                          "max_concurrency": 5, "rotate_user_agents": True},
+                "modules": {"disabled": ["dns_brute", "fuzz", "vhost", "port_scan",
+                                         "param_discovery", "injection_probe"]}},
+}
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
 _BANNER = r"""
  __     __    _     _ ____
  \ \   / /__ (_) __| |  _ \ ___  ___ ___  _ __
@@ -88,6 +113,10 @@ def _build_parser() -> argparse.ArgumentParser:
              "Loud and intrusive — requires confirmation (or --yes).",
     )
     run.add_argument("-y", "--yes", action="store_true", help="Skip the aggressive-mode confirmation prompt (for automation)")
+    run.add_argument("-p", "--profile", choices=["passive", "quick", "standard", "deep", "stealth"],
+                     help="Preset intensity: passive | quick | standard | deep | stealth")
+    run.add_argument("--ai", action="store_true",
+                     help="Enable LLM analysis (provider/model from env or config; heuristic advisor is always on)")
     run.add_argument("--phases", help="Comma list of phases to run: " + ", ".join(PHASE_NAMES.values()))
     run.add_argument("--only", help="Comma list of specific module names to run")
     run.add_argument("-c", "--config", help="Path to a config YAML file")
@@ -116,6 +145,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose (debug) logging")
     run.add_argument("-q", "--quiet", action="store_true", help="Only warnings and errors")
     run.add_argument("--no-banner", action="store_true", help="Suppress the banner")
+
+    # wizard --------------------------------------------------------------
+    sub.add_parser("wizard", help="Interactive guided setup (asks a few questions, then runs)")
 
     # modules -------------------------------------------------------------
     mods = sub.add_parser("modules", help="List available modules")
@@ -244,7 +276,7 @@ def _config_overrides(args) -> dict:
         ov["http"]["verify_tls"] = False
     if getattr(args, "output_dir", None):
         ov["general"]["output_dir"] = args.output_dir
-    if getattr(args, "llm", False):
+    if getattr(args, "llm", False) or getattr(args, "ai", False):
         ov["intel"]["llm_enabled"] = True
     if getattr(args, "llm_provider", None):
         ov["intel"]["llm_provider"] = args.llm_provider
@@ -322,7 +354,9 @@ def _confirm_aggressive(scope: Scope, assume_yes: bool) -> bool:
 async def _run(args) -> int:
     from voidrecon.core.logging import get_logger
 
-    cfg = Config.load(args.config, overrides=_config_overrides(args))
+    profile_ov = PROFILES.get(getattr(args, "profile", None), {})
+    overrides = _merge(profile_ov, _config_overrides(args))
+    cfg = Config.load(args.config, overrides=overrides)
     wildcard_apex = bool(cfg.get("general.wildcard_apex", True))
     scope = _build_scope(args, wildcard_apex)
 
@@ -459,6 +493,15 @@ async def _run(args) -> int:
              ", ".join(f"{v} {k}" for k, v in counts.items() if v))
     for fmt, path in written.items():
         log.info("report (%s): %s", fmt, path)
+
+    # Advisor summary — the "what to do next" plan, front and centre.
+    advice = getattr(ctx.store, "advice", []) or []
+    if advice and not args.quiet:
+        print("\n\033[1mRecommended next steps:\033[0m")
+        for i, rec in enumerate(advice[:5], 1):
+            print(f"  {i}. {rec['action']}")
+            if rec.get("command"):
+                print(f"     → {rec['command']}")
     print(f"\nResults written to: {ctx.output_dir}")
     return 0
 
@@ -598,6 +641,7 @@ def _run_namespace(**over):
         header=[], cookie=[], bearer=None, login_url=None, login_user=None, login_pass=None,
         formats=None, notify_webhook=None, llm=False, llm_provider=None, llm_model=None,
         disable=[], resume=None, no_live=True, verbose=False, quiet=False, no_banner=True,
+        profile=None, ai=False,
     )
     defaults.update(over)
     return argparse.Namespace(**defaults)
@@ -673,6 +717,40 @@ async def _cmd_worker(args) -> int:
     return 0
 
 
+def _cmd_wizard(args) -> int:
+    print(_BANNER)
+    print("VoidRecon guided setup — press Enter to accept the [default].\n")
+    try:
+        target = input("  Target domain(s), space-separated: ").strip()
+        if not target:
+            print("no target given.", file=sys.stderr)
+            return 2
+        print("\n  Intensity:")
+        print("    1) passive   (quiet OSINT only — always safe)")
+        print("    2) quick     (active, fast, essentials)")
+        print("    3) standard  (active, default depth)  [default]")
+        print("    4) deep      (active, every module)")
+        print("    5) stealth   (active, very slow & quiet)")
+        choice = input("  Choose 1-5 [3]: ").strip() or "3"
+        profile = {"1": "passive", "2": "quick", "3": "standard",
+                   "4": "deep", "5": "stealth"}.get(choice, "standard")
+        ai = input("  Enable AI/LLM analysis? (needs a key) [y/N]: ").strip().lower() in ("y", "yes")
+        scope_extra = input("  Extra in-scope entries (optional, space-separated): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\ncancelled", file=sys.stderr)
+        return 130
+
+    active = profile != "passive"
+    print(f"\n→ voidrecon run {target} --profile {profile}" + (" --ai" if ai else ""))
+    run_args = _run_namespace(
+        targets=target.split(),
+        include=scope_extra.split() if scope_extra else [],
+        profile=profile, active=active, ai=ai,
+        no_live=False, no_banner=True, yes=True,
+    )
+    return asyncio.run(_run(run_args))
+
+
 def _cmd_serve(args) -> int:
     from voidrecon.reporting.webserver import serve
 
@@ -706,6 +784,8 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\ninterrupted", file=sys.stderr)
             return 130
+    if args.command == "wizard":
+        return _cmd_wizard(args)
     if args.command == "modules":
         return _cmd_modules(args)
     if args.command == "diff":

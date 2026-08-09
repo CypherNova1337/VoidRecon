@@ -44,8 +44,8 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery, live TLS-certificate SAN harvesting | **Yes** — gated |
 | **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, CMS enumeration (WordPress/Drupal/Joomla), JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec discovery + deep GraphQL (introspection & suggestion harvesting), email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification, injection-point probing (SSTI / CRLF / reflected-XSS / cache-deception candidates), open-redirect confirmation, JWT analysis (alg:none / no-expiry / authz claims), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
-| **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
+| **vuln** | Native version→CVE correlation, subdomain-takeover verification, SQLi (error/boolean) + SSRF (OOB) + prototype-pollution + SSTI/CRLF/XSS/cache-deception probing, open-redirect confirmation, vuln-hint URL classification, JWT analysis, security-header/CORS/cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), **the Advisor** (ranked next-step plan), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
 
@@ -63,6 +63,24 @@ pip install -e ".[full]"    # + optional accelerators (tldextract, mmh3, bs4)
 Requires Python 3.10+. Core dependencies: `httpx`, `PyYAML`, `rich`, `dnspython`.
 
 ## Quickstart
+
+**New to it? Just run the wizard** — it asks a few questions and does the rest:
+
+```bash
+voidrecon wizard
+```
+
+Or pick a one-word **profile** instead of memorising flags:
+
+```bash
+voidrecon run example.com --profile passive   # quiet OSINT only (default posture)
+voidrecon run example.com --profile quick     # active, fast, essentials
+voidrecon run example.com --profile standard  # active, default depth
+voidrecon run example.com --profile deep      # active, every module
+voidrecon run example.com --profile stealth   # active, very slow & quiet
+```
+
+Full control is still there:
 
 ```bash
 # Quiet, passive-only recon (the default)
@@ -236,15 +254,19 @@ voidrecon run example.com --aggressive --yes \
 
 Everything works without any keys — configured sources simply add depth.
 
-## The intelligence layer
+## Intelligence & AI
 
-The heuristic scorer is always on and offline. To add model-assisted analysis:
+VoidRecon has a three-tier brain, and the first two need no key and no network:
+
+1. **Scoring** — every asset gets a "juiciness" score (dev/admin/API/exposed signals, risky ports, dangling records, secrets), so the report leads with what matters.
+2. **The Advisor** — reads all findings and produces a ranked, plain-English **next-step plan** with the assets involved and a ready-to-run command for each ("Verify subdomain takeovers → `voidrecon run … --only dns_resolve,takeover_verify`"). It prints at the end of every run and headlines the report.
+3. **LLM analysis (optional)** — a provider-agnostic model layer that reasons over the top surface and augments the plan. Enable it with `--ai`:
 
 ```bash
 export VOIDRECON_LLM_API_KEY=sk-...
-voidrecon run example.com --llm --llm-provider openai --llm-model gpt-4o-mini
-# or, fully local:
-voidrecon run example.com --llm --llm-provider ollama --llm-model llama3.1
+voidrecon run example.com --ai --llm-provider openai --llm-model gpt-4o-mini
+# or fully local, no data leaves your machine:
+voidrecon run example.com --ai --llm-provider ollama --llm-model llama3.1
 ```
 
 The model receives a compact digest of the top-scoring assets and returns a summary, prioritised targets with suggested checks, thematic clusters, and anything the numeric scoring under-weighted. It is advisory only and **never triggers network actions on its own**.
