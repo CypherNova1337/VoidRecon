@@ -16,6 +16,9 @@ opsec:
   # unless you pass --active or set this to true. Keep it off unless you are
   # authorized to actively probe the in-scope assets.
   allow_active: false
+  # Aggressive mode: active + every opt-in module + heavier throughput.
+  # Prefer the --aggressive CLI flag, which also handles the confirmation prompt.
+  aggressive: false
   max_concurrency: 20
   requests_per_second: 8.0
   jitter: 0.3            # randomised +/- fraction added to request spacing
@@ -30,7 +33,10 @@ http:
   max_redirects: 5
 
 modules:
-  disabled: []          # module names to never run
+  disabled: []          # module names to never run (always wins over 'enabled')
+  # Force-enable opt-in modules (port_scan, crawl, tech_cve) by name.
+  # "*" enables every opt-in module (aggressive mode sets this automatically).
+  enabled: []
   # Per-module options, e.g.:
   # port_scan:
   #   ports: [80, 443, 8080, 8443]

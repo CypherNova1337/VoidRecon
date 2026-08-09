@@ -50,11 +50,12 @@ class Crawl(Module):
 
     async def _crawl_with_tool(self, ctx: RunContext, tool: str, seeds: list[str]) -> None:
         stdin = "\n".join(seeds)
+        depth = "3" if ctx.config.get("opsec.aggressive") else "2"
         if tool == "katana":
-            args = ["-silent", "-jc", "-d", "2", "-list", "-"]
+            args = ["-silent", "-jc", "-d", depth, "-list", "-"]
             result = await run_tool("katana", args, stdin=stdin, timeout=600)
         else:  # gospider
-            args = ["-q", "-d", "2", "-S", "-"]
+            args = ["-q", "-d", depth, "-S", "-"]
             result = await run_tool("gospider", args, stdin=stdin, timeout=600)
         if not result.ok:
             self.log.warning("%s crawl failed", tool)

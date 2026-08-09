@@ -16,6 +16,8 @@
 
 ---
 
+> 🚧 **Work in progress.** VoidRecon is under active development. The engine, the deep passive/OSINT layer, active probing, JavaScript analysis, and aggressive mode are functional today; other modules are being expanded (see [Roadmap](#roadmap)). Interfaces and defaults may change between releases.
+
 VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, and an extensible module system.
 
 > ⚠️ **Authorized use only.** VoidRecon is built for bug bounty programs and sanctioned penetration tests. Passive collection is on by default; anything that *touches the target* is gated behind an explicit `--active` flag **and** a positive in-scope check. You are responsible for staying within your authorization and the law.
@@ -76,12 +78,33 @@ voidrecon run example.com --active
 # Add opt-in noisy modules once you're authorized
 voidrecon run example.com --active --only http_probe,port_scan,tech_cve
 
+# AGGRESSIVE — everything, maximum coverage. Prompts for confirmation first.
+voidrecon run example.com --aggressive
+voidrecon run example.com --aggressive --yes   # skip the prompt (automation)
+
 # Inspect available modules / verify how a host classifies against your scope
 voidrecon modules
 voidrecon scope example.com --include "*.example.com" --check dev.example.com
 ```
 
 Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table.
+
+### Aggressive mode
+
+`--aggressive` (`-A`) is the "hit everything we can" switch. It:
+
+- enables active mode and **every opt-in module** (HTTP probing, port scanning, crawling, JS mining, template scanning);
+- widens the port sweep (top ~130 service ports) and deepens crawling;
+- raises throughput (higher requests/sec and concurrency).
+
+Because it is **loud and intrusive**, VoidRecon shows a warning and requires you to type `yes` before starting. In a non-interactive session (a pipe or CI) it refuses to run unless you pass `--yes`:
+
+```bash
+voidrecon run example.com --aggressive          # interactive confirmation
+voidrecon run example.com --aggressive --yes    # confirmed up front (automation)
+```
+
+Even in aggressive mode the scope conscience still applies: **only positively in-scope, resolving assets are ever actively touched.** Use it only where you are explicitly authorized — it will be noticed and can trip rate limits, WAFs, and IDS/IPS.
 
 ### Scope files
 

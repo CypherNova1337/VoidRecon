@@ -68,13 +68,28 @@ class Module:
         raise NotImplementedError
 
     def should_run(self, ctx: RunContext) -> bool:
-        """Skip active modules unless active mode is on. Modules may override to
-        add their own preconditions (e.g. an API key present)."""
+        """Decide whether this module runs for the current engagement.
+
+        Rules, in order:
+
+        * a module named in ``modules.disabled`` never runs;
+        * an ``active`` module runs only when active mode is on;
+        * an *opt-in* module (``enabled_by_default = False``) runs only when it is
+          explicitly enabled — listed in ``modules.enabled``, selected via
+          ``--only`` (which the CLI folds into ``modules.enabled``), or when
+          ``modules.enabled`` contains ``"*"`` (aggressive mode enables everything).
+
+        Modules may override to add their own preconditions (e.g. an API key).
+        """
         disabled = set(ctx.config.get("modules.disabled", []) or [])
         if self.name in disabled:
             return False
         if self.active and not ctx.active_allowed:
             return False
+        if not self.enabled_by_default:
+            enabled = set(ctx.config.get("modules.enabled", []) or [])
+            if "*" not in enabled and self.name not in enabled:
+                return False
         return True
 
     def __repr__(self) -> str:  # pragma: no cover

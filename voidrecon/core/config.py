@@ -29,6 +29,9 @@ DEFAULTS: dict[str, Any] = {
         # Passive is always allowed. Active interaction is off unless explicitly
         # enabled — this keeps VoidRecon quiet and lawful by default.
         "allow_active": False,
+        # Aggressive mode: maximum-coverage recon. Enables active mode, every
+        # opt-in module, and heavier throughput. Requires explicit confirmation.
+        "aggressive": False,
         "max_concurrency": 20,
         "requests_per_second": 8.0,
         "jitter": 0.3,               # +/- fraction randomly added to delays
@@ -45,6 +48,9 @@ DEFAULTS: dict[str, Any] = {
     "modules": {
         # Per-module enable flags and options are merged in here.
         "disabled": [],
+        # Force-enable opt-in modules by name. "*" enables every opt-in module
+        # (set automatically by aggressive mode). --only also folds names in here.
+        "enabled": [],
     },
     "sources": {
         # Optional API keys/endpoints for richer passive sources. All optional.

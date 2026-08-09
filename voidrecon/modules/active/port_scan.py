@@ -26,6 +26,20 @@ TOP_PORTS = [
     8080, 8443, 8888, 9000, 9200, 9300, 11211, 27017,
 ]
 
+# Wider sweep used in aggressive mode (top ~100 service ports).
+AGGRESSIVE_PORTS = sorted(set(TOP_PORTS + [
+    7, 20, 26, 37, 79, 81, 88, 106, 113, 119, 179, 199, 389, 427, 465, 513,
+    514, 515, 543, 544, 548, 554, 587, 631, 646, 873, 990, 1025, 1026, 1027,
+    1080, 1110, 1194, 1234, 1720, 1723, 1900, 2000, 2001, 2082, 2083, 2086,
+    2087, 2095, 2096, 2181, 2222, 2483, 2484, 3000, 3128, 3268, 3269, 3690,
+    4000, 4040, 4443, 4444, 4567, 4711, 4848, 5000, 5001, 5060, 5061, 5222,
+    5555, 5672, 5800, 5938, 5984, 5985, 5986, 6000, 6001, 6443, 6660, 6667,
+    7000, 7001, 7070, 7077, 7443, 7474, 7687, 8001, 8009, 8081, 8082, 8083,
+    8088, 8090, 8091, 8161, 8180, 8333, 8500, 8834, 8880, 9001, 9042, 9090,
+    9091, 9092, 9160, 9418, 9443, 9800, 9999, 10000, 10250, 15672, 16010,
+    27018, 28017, 50000, 50070,
+]))
+
 # Ports whose exposure is inherently noteworthy.
 _SENSITIVE = {
     23: "Telnet", 445: "SMB", 1433: "MSSQL", 2375: "Docker API", 3306: "MySQL",
@@ -49,7 +63,8 @@ class PortScan(Module):
             self.log.info("no in-scope IPs to scan")
             return
 
-        ports = ctx.config.get("modules.port_scan.ports", TOP_PORTS) or TOP_PORTS
+        default_ports = AGGRESSIVE_PORTS if ctx.config.get("opsec.aggressive") else TOP_PORTS
+        ports = ctx.config.get("modules.port_scan.ports", default_ports) or default_ports
 
         if ctx.tools.first_available("naabu", "nmap"):
             await self._scan_with_tool(ctx, ips, ports)

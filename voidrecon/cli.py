@@ -73,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("-x", "--exclude", action="append", default=[], help="Add an out-of-scope entry (repeatable)")
     run.add_argument("-S", "--scope-file", help="File with scope entries (txt lines or JSON/YAML include/exclude)")
     run.add_argument("--active", action="store_true", help="Enable active modules (probing/scanning). Off by default.")
+    run.add_argument(
+        "-A", "--aggressive", action="store_true",
+        help="Maximum-coverage recon: active mode + every opt-in module + heavier throughput. "
+             "Loud and intrusive — requires confirmation (or --yes).",
+    )
+    run.add_argument("-y", "--yes", action="store_true", help="Skip the aggressive-mode confirmation prompt (for automation)")
     run.add_argument("--phases", help="Comma list of phases to run: " + ", ".join(PHASE_NAMES.values()))
     run.add_argument("--only", help="Comma list of specific module names to run")
     run.add_argument("-c", "--config", help="Path to a config YAML file")
@@ -155,6 +161,21 @@ def _config_overrides(args) -> dict:
     ov: dict = {"opsec": {}, "http": {}, "intel": {}, "general": {}, "modules": {}}
     if getattr(args, "active", False):
         ov["opsec"]["allow_active"] = True
+    if getattr(args, "aggressive", False):
+        # Aggressive = everything on. Active mode, all opt-in modules, and heavier
+        # throughput. Explicit flags below still win (they are merged after).
+        ov["opsec"]["aggressive"] = True
+        ov["opsec"]["allow_active"] = True
+        ov["opsec"].setdefault("requests_per_second", 25.0)
+        ov["opsec"].setdefault("max_concurrency", 50)
+        ov["opsec"].setdefault("jitter", 0.1)
+        ov["modules"]["enabled"] = ["*"]
+    # --only force-enables the named modules even if they are opt-in.
+    if getattr(args, "only", None):
+        names = [m.strip() for m in args.only.split(",") if m.strip()]
+        existing = ov["modules"].get("enabled", [])
+        if "*" not in existing:
+            ov["modules"]["enabled"] = list(dict.fromkeys(existing + names))
     if getattr(args, "rps", None) is not None:
         ov["opsec"]["requests_per_second"] = args.rps
     if getattr(args, "concurrency", None) is not None:
@@ -178,6 +199,47 @@ def _config_overrides(args) -> dict:
     return ov
 
 
+def _confirm_aggressive(scope: Scope, assume_yes: bool) -> bool:
+    """Show the aggressive-mode warning and require an explicit yes.
+
+    Non-interactive sessions must pass --yes; we never assume consent from a
+    pipe. Returns True if the run may proceed.
+    """
+    targets = ", ".join(scope.seeds) or "the provided scope"
+    warning = f"""
+{'=' * 68}
+  ⚠  AGGRESSIVE MODE — LOUD, INTRUSIVE, HIGH-VOLUME RECON
+{'=' * 68}
+  This enables ACTIVE interaction with the target and EVERY opt-in
+  module (HTTP probing, port scanning, crawling, JS mining, template
+  scanning) at elevated request rates.
+
+  Only in-scope, resolving assets are ever touched — but this WILL be
+  noticed. It generates significant traffic and may trip rate limits,
+  WAFs, or IDS/IPS.
+
+  Target scope : {targets}
+
+  Run this ONLY against assets you are explicitly authorized to test
+  (an active bug bounty program or a signed engagement). You are
+  responsible for staying within scope and the law.
+{'=' * 68}
+"""
+    print(warning, file=sys.stderr)
+    if assume_yes:
+        print("  --yes supplied; proceeding.\n", file=sys.stderr)
+        return True
+    if not sys.stdin.isatty():
+        print("  Non-interactive session: re-run with --yes to confirm aggressive mode.\n", file=sys.stderr)
+        return False
+    try:
+        resp = input("  Type 'yes' to confirm you are authorized and want to proceed: ")
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return False
+    return resp.strip().lower() in ("y", "yes")
+
+
 async def _run(args) -> int:
     from voidrecon.core.logging import get_logger
 
@@ -195,9 +257,19 @@ async def _run(args) -> int:
 
     if not args.no_banner and not args.quiet:
         print(_BANNER)
+
+    aggressive = bool(cfg.get("opsec.aggressive", False))
+    if aggressive and not _confirm_aggressive(scope, args.yes):
+        print("aborted: aggressive mode not confirmed.", file=sys.stderr)
+        await ctx.aclose()
+        return 3
+
     log.info("run id: [bold]%s[/]", ctx.run_id)
     log.info("seeds: %s", ", ".join(scope.seeds) or "—")
-    log.info("active mode: %s", "[bold red]ON[/]" if ctx.active_allowed else "off (passive only)")
+    if aggressive:
+        log.info("mode: [bold red]AGGRESSIVE[/] — active + all opt-in modules, heavier throughput")
+    else:
+        log.info("active mode: %s", "[bold red]ON[/]" if ctx.active_allowed else "off (passive only)")
     tools = ctx.tools.available()
     if tools:
         log.info("external tools available: %s", ", ".join(sorted(tools)))
