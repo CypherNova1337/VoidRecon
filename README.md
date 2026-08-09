@@ -40,11 +40,11 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
 | **scope** | Org footprint: ASN + netblock mapping (shared-CDN ASNs recognised, not mis-claimed), RDAP registration intel (registrar/registrant/NS) | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email records (SPF/DMARC/DKIM/CAA), zone-transfer (AXFR) attempts + SPF-chain mining, breach correlation (HaveIBeenPwned), Shodan host enrichment | No (third-party data) |
+| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, search-engine dork generation, cloud-bucket discovery, DNS/email records (SPF/DMARC/DKIM/CAA), zone-transfer (AXFR) + SPF-chain mining, reverse-IP hosting lookup, breach correlation (HaveIBeenPwned), Shodan host enrichment | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery, live TLS-certificate SAN harvesting | **Yes** — gated |
-| **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, CMS enumeration (WordPress/Drupal/Joomla), JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec discovery + deep GraphQL (introspection & suggestion harvesting), email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), open-redirect confirmation, JWT analysis (alg:none / no-expiry / authz claims), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
@@ -278,9 +278,24 @@ SQLite persistence, run-to-run diffing, trend dashboards, and completion webhook
 Still growing:
 
 - Expanded/curated CVE + fingerprint datasets (bundled feeds)
-- Reflected-parameter and injection-point discovery
-- Distributed / resumable runs for very large engagements
-- Web UI over the SQLite datastore
+- Authenticated login-flow automation (scripted form/OAuth login)
+- Distributed multi-worker runs sharing one datastore
+- Deeper injection-point testing (SSTI/CRLF/cache-deception candidates)
+
+## Docker
+
+The image bundles VoidRecon with the binaries it orchestrates (dns-helix,
+paramvoid, subfinder, httpx, dnsx, katana, nuclei, gau) and a headless browser,
+so the hybrid fast-path works out of the box:
+
+```bash
+docker build -t voidrecon .
+docker run --rm -it -v "$PWD/runs:/runs" voidrecon run example.com
+docker run --rm -it -v "$PWD/runs:/runs" voidrecon run example.com --aggressive --yes
+```
+
+Output is written to the mounted `/runs` volume. Pass API keys with `-e`, e.g.
+`-e VOIDRECON_SOURCES_SHODAN_API_KEY=...`.
 
 ## Development
 

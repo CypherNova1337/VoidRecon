@@ -7,6 +7,20 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (CMS, GraphQL, JWT, redirects, Docker)
+- **cms_enum:** WordPress/Drupal/Joomla version, user enumeration (WP REST API),
+  and exposure checks (xmlrpc, Drupal CHANGELOG).
+- **graphql:** full introspection dump (flagging destructive/admin mutations) and
+  field-suggestion harvesting when introspection is disabled.
+- **jwt_analysis:** finds and decodes JWTs, flagging alg:none, missing expiry, and
+  authorization claims.
+- **open_redirect:** confirms open redirects by testing redirect-style parameters
+  with a harmless canary destination.
+- **reverse_ip:** reverse-IP hosting lookup to find co-hosted domains.
+- **dork_report:** generates ready-to-run Google/GitHub/Shodan/Censys dork URLs.
+- **Docker image:** bundles VoidRecon with dns-helix, paramvoid, and ProjectDiscovery
+  tools plus a headless browser (multi-stage Dockerfile).
+
 ### Added (real-world recon methodologies)
 - **whois_rdap:** domain registration intel via RDAP (registrar/registrant/dates/
   nameservers) — the modern, non-deprecated successor to WHOIS; attribution pivot.
