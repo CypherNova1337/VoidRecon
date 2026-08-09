@@ -1,0 +1,89 @@
+{
+  "_comment": "Curated, extensible product->CVE signatures for native version-based correlation. Versions are matched inclusively (min/max). This is a high-signal starter set maintained by VoidSec-Hub, not an exhaustive feed; extend it freely. Findings are advisory and must be verified.",
+  "signatures": [
+    {
+      "product": "apache http server",
+      "match": ["apache", "httpd"],
+      "exclude": ["apache-coyote", "tomcat"],
+      "cves": [
+        {"id": "CVE-2021-41773", "severity": "critical", "min": "2.4.49", "max": "2.4.49", "title": "Apache path traversal / RCE (mod_cgi)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2021-41773"},
+        {"id": "CVE-2021-42013", "severity": "critical", "min": "2.4.49", "max": "2.4.50", "title": "Apache path traversal / RCE (incomplete fix for 41773)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2021-42013"},
+        {"id": "CVE-2019-0211", "severity": "high", "min": "2.4.17", "max": "2.4.38", "title": "Apache local privilege escalation (scoreboard)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2019-0211"}
+      ]
+    },
+    {
+      "product": "nginx",
+      "match": ["nginx"],
+      "cves": [
+        {"id": "CVE-2019-20372", "severity": "medium", "max": "1.17.6", "title": "nginx error_page request smuggling", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2019-20372"},
+        {"id": "CVE-2021-23017", "severity": "high", "min": "0.6.18", "max": "1.20.0", "title": "nginx resolver off-by-one heap write", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2021-23017"}
+      ]
+    },
+    {
+      "product": "php",
+      "match": ["php"],
+      "cves": [
+        {"id": "CVE-2024-4577", "severity": "critical", "max": "8.3.7", "title": "PHP-CGI argument injection (Windows) RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2024-4577"},
+        {"id": "CVE-2019-11043", "severity": "critical", "min": "7.1.0", "max": "7.3.10", "title": "PHP-FPM underflow RCE (env_path_info)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2019-11043"}
+      ]
+    },
+    {
+      "product": "apache tomcat",
+      "match": ["tomcat", "apache-coyote"],
+      "cves": [
+        {"id": "CVE-2020-1938", "severity": "critical", "min": "6.0.0", "max": "9.0.30", "title": "Tomcat AJP Ghostcat file read / potential RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2020-1938"},
+        {"id": "CVE-2025-24813", "severity": "high", "min": "9.0.0", "max": "9.0.98", "title": "Tomcat partial PUT deserialization RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2025-24813"}
+      ]
+    },
+    {
+      "product": "jenkins",
+      "match": ["jenkins"],
+      "cves": [
+        {"id": "CVE-2024-23897", "severity": "critical", "max": "2.441", "title": "Jenkins arbitrary file read via CLI (args4j)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2024-23897"}
+      ]
+    },
+    {
+      "product": "atlassian confluence",
+      "match": ["confluence"],
+      "cves": [
+        {"id": "CVE-2022-26134", "severity": "critical", "max": "7.18.0", "title": "Confluence OGNL injection RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2022-26134"},
+        {"id": "CVE-2023-22515", "severity": "critical", "min": "8.0.0", "max": "8.5.1", "title": "Confluence broken access control / privilege escalation", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2023-22515"}
+      ]
+    },
+    {
+      "product": "grafana",
+      "match": ["grafana"],
+      "cves": [
+        {"id": "CVE-2021-43798", "severity": "high", "min": "8.0.0", "max": "8.3.0", "title": "Grafana directory traversal (plugin path)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2021-43798"}
+      ]
+    },
+    {
+      "product": "gitlab",
+      "match": ["gitlab"],
+      "cves": [
+        {"id": "CVE-2023-7028", "severity": "critical", "min": "16.1.0", "max": "16.7.1", "title": "GitLab account takeover via password reset to unverified email", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2023-7028"}
+      ]
+    },
+    {
+      "product": "drupal",
+      "match": ["drupal"],
+      "cves": [
+        {"id": "CVE-2018-7600", "severity": "critical", "min": "7.0.0", "max": "8.5.0", "title": "Drupalgeddon2 remote code execution", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2018-7600"}
+      ]
+    },
+    {
+      "product": "microsoft exchange",
+      "match": ["exchange"],
+      "cves": [
+        {"id": "CVE-2021-26855", "severity": "critical", "max": "15.2.792.3", "title": "Exchange ProxyLogon SSRF -> RCE chain", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2021-26855"}
+      ]
+    },
+    {
+      "product": "openssl",
+      "match": ["openssl"],
+      "cves": [
+        {"id": "CVE-2014-0160", "severity": "high", "min": "1.0.1", "max": "1.0.1f", "title": "OpenSSL Heartbleed memory disclosure", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2014-0160"}
+      ]
+    }
+  ]
+}

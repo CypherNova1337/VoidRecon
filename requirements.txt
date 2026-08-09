@@ -1,0 +1,10 @@
+# Core runtime dependencies
+httpx>=0.27
+PyYAML>=6.0
+rich>=13.0
+dnspython>=2.4
+
+# Optional (installed with: pip install -e ".[full]") — enable extra sources/speed.
+# beautifulsoup4>=4.12
+# tldextract>=5.1
+# mmh3>=4.0

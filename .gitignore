@@ -1,0 +1,30 @@
+# VoidRecon local artifacts
+/output/
+/runs/
+*.voidrecon.json
+*.log
+
+# Secrets / config overrides
+.env
+config.local.yaml
+configs/*.local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

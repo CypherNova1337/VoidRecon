@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voidrecon"
+version = "0.1.0"
+description = "Adversary-minded reconnaissance framework for authorized bug bounty and penetration testing engagements."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "VoidSec-Hub" }]
+maintainers = [{ name = "VoidSec-Hub" }]
+keywords = [
+    "bug-bounty",
+    "reconnaissance",
+    "recon",
+    "osint",
+    "attack-surface",
+    "security",
+    "pentest",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "httpx>=0.27",
+    "PyYAML>=6.0",
+    "rich>=13.0",
+    "dnspython>=2.4",
+]
+
+[project.optional-dependencies]
+# Optional accelerators / extra sources. Everything degrades gracefully without them.
+full = [
+    "beautifulsoup4>=4.12",
+    "tldextract>=5.1",
+]
+# Screenshotting / visual triage backend (headless Chromium via Playwright).
+screenshots = [
+    "playwright>=1.40",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/CypherNova1337/VoidRecon"
+Repository = "https://github.com/CypherNova1337/VoidRecon"
+Issues = "https://github.com/CypherNova1337/VoidRecon/issues"
+
+[project.scripts]
+voidrecon = "voidrecon.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["voidrecon*"]
+
+[tool.setuptools.package-data]
+voidrecon = ["reporting/templates/*.html", "reporting/templates/*.md", "data/*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
