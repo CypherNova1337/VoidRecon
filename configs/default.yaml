@@ -1,0 +1,54 @@
+# VoidRecon default configuration.
+#
+# Copy this to config.local.yaml (gitignored) and edit, or point --config at it.
+# Environment variables override file values: VOIDRECON_<SECTION>_<KEY>.
+# API keys should be supplied via the environment, never committed.
+
+general:
+  output_dir: runs
+  log_level: info
+  user_agent: "VoidRecon/0.1 (+https://github.com/CypherNova1337/VoidRecon)"
+  # When true, a bare apex in scope (example.com) also covers its subdomains.
+  wildcard_apex: true
+
+opsec:
+  # Passive recon is always allowed. Active interaction with the target is OFF
+  # unless you pass --active or set this to true. Keep it off unless you are
+  # authorized to actively probe the in-scope assets.
+  allow_active: false
+  max_concurrency: 20
+  requests_per_second: 8.0
+  jitter: 0.3            # randomised +/- fraction added to request spacing
+  timeout: 20.0
+  retries: 2
+  rotate_user_agents: true
+  respect_out_of_scope: true
+
+http:
+  verify_tls: true
+  follow_redirects: true
+  max_redirects: 5
+
+modules:
+  disabled: []          # module names to never run
+  # Per-module options, e.g.:
+  # port_scan:
+  #   ports: [80, 443, 8080, 8443]
+
+sources:
+  # All optional. Prefer env vars, e.g. VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx
+  github_token: null
+  shodan_api_key: null
+  securitytrails_api_key: null
+  virustotal_api_key: null
+
+intel:
+  llm_enabled: false
+  llm_provider: none    # none | openai | anthropic | ollama | openai_compatible
+  llm_model: ""         # e.g. gpt-4o-mini, claude-3-5-sonnet, llama3.1
+  llm_base_url: ""      # for ollama (http://localhost:11434) or a compatible gateway
+  llm_api_key_env: VOIDRECON_LLM_API_KEY
+  llm_max_assets: 60
+
+reporting:
+  formats: [json, markdown, html]
