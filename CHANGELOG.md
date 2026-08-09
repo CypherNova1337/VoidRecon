@@ -7,6 +7,17 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (auth automation, distributed workers, injection probing)
+- **Authenticated login automation:** scripted headless-browser login
+  (`--login-url/--login-user/--login-pass` or `auth.login`) captures the session
+  and feeds it to every active module; handles many OAuth-backed logins.
+- **Distributed runs:** SQLite-backed work queue with atomic claiming — new
+  `voidrecon queue add|list|clear` and `voidrecon worker` (run many in parallel,
+  all writing to one datastore).
+- **injection_probe:** SSTI (template arithmetic), CRLF/header injection,
+  reflected-XSS-context, and web-cache-deception candidate detection with benign
+  markers.
+
 ### Added (CMS, GraphQL, JWT, redirects, Docker)
 - **cms_enum:** WordPress/Drupal/Joomla version, user enumeration (WP REST API),
   and exposure checks (xmlrpc, Drupal CHANGELOG).

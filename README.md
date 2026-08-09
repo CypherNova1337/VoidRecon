@@ -44,7 +44,7 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
 | **active** | HTTP(S) probing/fingerprinting, high-value port discovery, live TLS-certificate SAN harvesting | **Yes** — gated |
 | **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, CMS enumeration (WordPress/Drupal/Joomla), JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec discovery + deep GraphQL (introspection & suggestion harvesting), email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), open-redirect confirmation, JWT analysis (alg:none / no-expiry / authz claims), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification, injection-point probing (SSTI / CRLF / reflected-XSS / cache-deception candidates), open-redirect confirmation, JWT analysis (alg:none / no-expiry / authz claims), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
@@ -192,6 +192,36 @@ voidrecon run app.example.com --active \
   --cookie "session=deadbeef"
 ```
 
+### Authenticated login automation
+
+Point VoidRecon at a login form and it logs in with a headless browser once, then
+reuses that session for every active module (crawler, fuzzer, param/GraphQL/JWT,
+etc.) — where access-control and IDOR bugs actually live:
+
+```bash
+voidrecon run app.example.com --active \
+  --login-url https://app.example.com/login \
+  --login-user analyst@example.com --login-pass 'hunter2'
+```
+
+Custom field selectors and a success check can be set under `auth.login` in config.
+It captures whatever cookies the flow sets, so many OAuth-backed logins work too.
+
+### Distributed runs (queue + workers)
+
+Drain a big target list across many parallel workers (processes on one box, or
+machines sharing the queue DB), all writing into one datastore:
+
+```bash
+voidrecon queue add a.com b.com c.com --active     # enqueue
+voidrecon queue list                               # inspect
+voidrecon worker &   voidrecon worker &            # N workers drain it in parallel
+voidrecon worker --poll 60                         # keep waiting for new jobs
+```
+
+Job claiming is atomic (SQLite WAL + guarded update), so no two workers take the
+same target.
+
 ### Completion notifications
 
 Point a Slack or Discord webhook at a long run and VoidRecon pings you when it
@@ -278,9 +308,9 @@ SQLite persistence, run-to-run diffing, trend dashboards, and completion webhook
 Still growing:
 
 - Expanded/curated CVE + fingerprint datasets (bundled feeds)
-- Authenticated login-flow automation (scripted form/OAuth login)
-- Distributed multi-worker runs sharing one datastore
-- Deeper injection-point testing (SSTI/CRLF/cache-deception candidates)
+- More injection classes (SQLi confirmation, SSRF OOB, prototype pollution)
+- Passive credential/token validation workflows
+- A richer web UI (filtering, cross-run views) over the datastore
 
 ## Docker
 

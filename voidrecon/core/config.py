@@ -51,6 +51,10 @@ DEFAULTS: dict[str, Any] = {
         # crawler, API discovery, fuzzer, etc. reach behind a login.
         "headers": {},   # e.g. {"Authorization": "Bearer <token>"}
         "cookies": {},   # e.g. {"session": "<value>"}
+        # Optional scripted browser login run once at start; captured cookies are
+        # merged into 'cookies'. Requires Playwright.
+        "login": {},     # {url, username, password, [username_selector, password_selector,
+                         #  submit_selector, success_text]}
     },
     "dns": {
         # Trusted resolvers for all DNS modules. Empty -> bundled list (dns-helix).

@@ -101,6 +101,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--cookie", action="append", default=[],
                      help="Auth cookie 'name=value' sent on every active request (repeatable)")
     run.add_argument("--bearer", help="Shorthand for --header 'Authorization: Bearer <token>'")
+    run.add_argument("--login-url", help="Login form URL — VoidRecon logs in via a browser and reuses the session")
+    run.add_argument("--login-user", help="Username/email for --login-url")
+    run.add_argument("--login-pass", help="Password for --login-url")
     run.add_argument("--formats", help="Report formats (comma): json,markdown,html")
     run.add_argument("--notify-webhook", help="Slack/Discord webhook URL for a completion summary")
     run.add_argument("--llm", action="store_true", help="Enable LLM analysis (requires provider config + key)")
@@ -133,6 +136,21 @@ def _build_parser() -> argparse.ArgumentParser:
     # update-cve ----------------------------------------------------------
     uc = sub.add_parser("update-cve", help="Fetch/merge an external CVE signature dataset")
     uc.add_argument("url", help="URL to a JSON dataset ({\"signatures\": [...]})")
+
+    # queue ---------------------------------------------------------------
+    q = sub.add_parser("queue", help="Manage the distributed work queue")
+    q.add_argument("action", choices=["add", "list", "clear"], help="Queue action")
+    q.add_argument("targets", nargs="*", help="Targets to add (for 'add')")
+    q.add_argument("--db", help="Queue DB path (default: <output_dir>/queue.db)")
+    q.add_argument("--active", action="store_true", help="Run added jobs in active mode")
+    q.add_argument("--aggressive", action="store_true", help="Run added jobs in aggressive mode")
+
+    # worker --------------------------------------------------------------
+    wk = sub.add_parser("worker", help="Run a queue worker (drains jobs; run several in parallel)")
+    wk.add_argument("--db", help="Queue DB path (default: <output_dir>/queue.db)")
+    wk.add_argument("--once", action="store_true", help="Process one job then exit")
+    wk.add_argument("--poll", type=int, default=0, help="Seconds to wait for new jobs before exiting (0 = exit when empty)")
+    wk.add_argument("--id", dest="worker_id", help="Worker identifier (default: host:pid)")
 
     # serve ---------------------------------------------------------------
     sv = sub.add_parser("serve", help="Browse the SQLite datastore in a local web UI")
@@ -376,6 +394,24 @@ async def _run(args) -> int:
     if tools:
         log.info("external tools available: %s", ", ".join(sorted(tools)))
 
+    # Authenticated login (scripted browser) — captured cookies feed active modules.
+    login_cfg = dict(cfg.get("auth.login", {}) or {})
+    for flag, key in (("login_url", "url"), ("login_user", "username"), ("login_pass", "password")):
+        if getattr(args, flag, None):
+            login_cfg[key] = getattr(args, flag)
+    if login_cfg.get("url") and login_cfg.get("username") and login_cfg.get("password"):
+        cfg.set("auth.login", login_cfg)
+        from voidrecon.core.login import perform_login
+
+        cookies = await perform_login(cfg)
+        if cookies:
+            merged = dict(cfg.get("auth.cookies", {}) or {})
+            merged.update(cookies)
+            cfg.set("auth.cookies", merged)
+            log.info("authenticated session active (%d cookies)", len(cookies))
+        else:
+            log.warning("login produced no session — continuing unauthenticated")
+
     phases = None
     if args.phases:
         phases = []
@@ -551,6 +587,92 @@ def _cmd_update_cve(args) -> int:
     return 0
 
 
+def _run_namespace(**over):
+    """A fully-defaulted argparse-style namespace for programmatic runs (workers)."""
+    import argparse
+
+    defaults = dict(
+        targets=[], url=None, import_scope=False, include=[], exclude=[], scope_file=None,
+        active=False, aggressive=False, yes=True, phases=None, only=None, config=None,
+        output_dir=None, rps=None, concurrency=None, timeout=None, no_verify_tls=False,
+        header=[], cookie=[], bearer=None, login_url=None, login_user=None, login_pass=None,
+        formats=None, notify_webhook=None, llm=False, llm_provider=None, llm_model=None,
+        disable=[], resume=None, no_live=True, verbose=False, quiet=False, no_banner=True,
+    )
+    defaults.update(over)
+    return argparse.Namespace(**defaults)
+
+
+def _queue_db(args) -> str:
+    cfg = Config.load(args.config if hasattr(args, "config") else None)
+    return args.db or str(Path(cfg.get("general.output_dir", "runs")) / "queue.db")
+
+
+def _cmd_queue(args) -> int:
+    from voidrecon.core.queue import JobQueue
+
+    q = JobQueue(_queue_db(args))
+    if args.action == "add":
+        if not args.targets:
+            print("error: 'queue add' needs at least one target", file=sys.stderr)
+            return 2
+        n = q.add_many(args.targets, {"active": args.active, "aggressive": args.aggressive})
+        print(f"queued {n} job(s). Start workers with: voidrecon worker")
+        return 0
+    if args.action == "list":
+        jobs = q.list()
+        if not jobs:
+            print("queue is empty")
+            return 0
+        for j in jobs:
+            print(f"  [{j['id']:>3}] {j['status']:<8} {j['target']}"
+                  + (f"  ({j['error']})" if j.get("error") else ""))
+        print(f"\nstats: {q.stats()}")
+        return 0
+    if args.action == "clear":
+        print(f"cleared {q.clear()} job(s)")
+        return 0
+    return 1
+
+
+async def _cmd_worker(args) -> int:
+    import asyncio
+
+    from voidrecon.core.queue import JobQueue
+
+    q = JobQueue(_queue_db(args))
+    worker_id = args.worker_id
+    processed = 0
+    idle_budget = args.poll
+    print(f"worker started (db={q.db_path}); draining queue…")
+    while True:
+        job = q.claim(worker_id)
+        if job is None:
+            if args.once or idle_budget <= 0:
+                break
+            await asyncio.sleep(min(5, idle_budget))
+            idle_budget -= 5
+            continue
+        idle_budget = args.poll
+        print(f"\n=== job {job['id']}: {job['target']} ===")
+        opts = job.get("options", {})
+        run_args = _run_namespace(targets=[job["target"]],
+                                  active=bool(opts.get("active") or opts.get("aggressive")),
+                                  aggressive=bool(opts.get("aggressive")))
+        try:
+            rc = await _run(run_args)
+            q.complete(job["id"], "done" if rc == 0 else "failed",
+                       None if rc == 0 else f"exit {rc}")
+            processed += 1
+        except Exception as exc:  # noqa: BLE001
+            q.complete(job["id"], "failed", str(exc))
+            print(f"job {job['id']} failed: {exc}", file=sys.stderr)
+        if args.once:
+            break
+    print(f"\nworker done — processed {processed} job(s). stats: {q.stats()}")
+    return 0
+
+
 def _cmd_serve(args) -> int:
     from voidrecon.reporting.webserver import serve
 
@@ -594,6 +716,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_update_cve(args)
     if args.command == "serve":
         return _cmd_serve(args)
+    if args.command == "queue":
+        return _cmd_queue(args)
+    if args.command == "worker":
+        try:
+            return asyncio.run(_cmd_worker(args))
+        except KeyboardInterrupt:
+            print("\nworker interrupted", file=sys.stderr)
+            return 130
     if args.command == "scope":
         return _cmd_scope(args)
     return 1

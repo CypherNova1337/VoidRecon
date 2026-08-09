@@ -44,6 +44,16 @@ auth:
   # API discovery, analysis). Prefer the --header/--cookie/--bearer CLI flags.
   headers: {}   # e.g. {Authorization: "Bearer <token>", X-Api-Key: "<key>"}
   cookies: {}   # e.g. {session: "<value>"}
+  # Optional scripted browser login (Playwright). Captured cookies merge into
+  # 'cookies'. Selectors are auto-detected; override only if needed.
+  login: {}
+  #   url: https://app.example.com/login
+  #   username: analyst@example.com
+  #   password: "hunter2"
+  #   username_selector: "#email"     # optional
+  #   password_selector: "#password"  # optional
+  #   submit_selector: "button[type=submit]"  # optional
+  #   success_text: "Dashboard"       # optional post-login body check
 
 modules:
   disabled: []          # module names to never run (always wins over 'enabled')
