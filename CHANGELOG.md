@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (real-world recon methodologies)
+- **whois_rdap:** domain registration intel via RDAP (registrar/registrant/dates/
+  nameservers) — the modern, non-deprecated successor to WHOIS; attribution pivot.
+- **dns_advanced:** zone-transfer (AXFR) attempts and SPF include-chain mining.
+- **tls_certs:** live TLS-certificate SAN harvesting (finds hosts not in CT logs).
+- **vhost:** virtual-host discovery via Host-header fuzzing on web IPs.
+- **csp_mining:** related-hostname extraction from CSP and security headers.
+- **sourcemaps:** recovers source from exposed JavaScript `.map` files.
+- **http_methods:** audits enabled HTTP verbs (PUT/DELETE/TRACE/PATCH).
+- **takeover_verify:** active subdomain-takeover confirmation against provider
+  fingerprints (can-i-take-over-xyz).
+- **shodan_host:** enriches discovered IPs with Shodan (ports/banners/CVEs), no
+  packets to the target.
+- `cryptography` added to the `full` extra (for TLS SAN parsing).
+
 ### Added (live UX, resumability, param discovery, integrations)
 - **Live progress checklist:** a real-time terminal table of every module by phase
   with status/elapsed/assets and running totals (`--no-live` to disable).

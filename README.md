@@ -39,12 +39,12 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
-| **scope** | Org footprint: ASN + netblock mapping from seed domains (shared-CDN ASNs are recognised and not mis-claimed) | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email-security records (SPF/DMARC/DKIM/CAA), breach correlation (HaveIBeenPwned) | No (third-party data) |
+| **scope** | Org footprint: ASN + netblock mapping (shared-CDN ASNs recognised, not mis-claimed), RDAP registration intel (registrar/registrant/NS) | No (routing registries) |
+| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, cloud-bucket discovery, DNS/email records (SPF/DMARC/DKIM/CAA), zone-transfer (AXFR) attempts + SPF-chain mining, breach correlation (HaveIBeenPwned), Shodan host enrichment | No (third-party data) |
 | **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
-| **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler + SPA/XHR headless crawler, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), deep tech fingerprinting, JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (auto-refreshable dataset), vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **active** | HTTP(S) probing/fingerprinting, high-value port discovery, live TLS-certificate SAN harvesting | **Yes** — gated |
+| **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec/GraphQL discovery, email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation (auto-refreshable), active subdomain-takeover verification, vuln-hint URL classification (SQLi/XSS/SSRF/LFI/RCE/redirect/SSTI/IDOR), security-header / CORS / cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
 | **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.

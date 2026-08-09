@@ -43,6 +43,7 @@ dependencies = [
 full = [
     "beautifulsoup4>=4.12",
     "tldextract>=5.1",
+    "cryptography>=41.0",
 ]
 # Screenshotting / visual triage backend (headless Chromium via Playwright).
 screenshots = [
