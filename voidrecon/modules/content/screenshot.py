@@ -14,42 +14,16 @@ neither backend is present.
 from __future__ import annotations
 
 import asyncio
-import glob
-import os
 
 from voidrecon.core.context import RunContext
 from voidrecon.core.module import Module, Phase, register
 from voidrecon.core.tools import run_tool
+from voidrecon.utils.browser import HAS_PLAYWRIGHT as _HAS_PLAYWRIGHT
+from voidrecon.utils.browser import launch_chromium
 from voidrecon.utils.text import slugify
 
-
-def _find_chromium() -> str | None:
-    """Locate a Chromium executable, tolerating Playwright version/browser drift.
-
-    Managed environments often ship a cached browser whose build number differs
-    from the installed Playwright package. When the default launch can't find its
-    expected binary we fall back to whatever Chromium is on disk.
-    """
-    explicit = os.environ.get("VOIDRECON_CHROMIUM") or os.environ.get("CHROMIUM_PATH")
-    if explicit and os.path.exists(explicit):
-        return explicit
-    roots = [os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"), "/opt/pw-browsers"]
-    patterns = ["chromium-*/chrome-linux/chrome", "chromium_headless_shell-*/chrome-linux/headless_shell"]
-    for root in roots:
-        if not root or not os.path.isdir(root):
-            continue
-        for pat in patterns:
-            hits = sorted(glob.glob(os.path.join(root, pat)))
-            if hits:
-                return hits[-1]
-    return None
-
-try:
+if _HAS_PLAYWRIGHT:
     from playwright.async_api import async_playwright  # type: ignore
-
-    _HAS_PLAYWRIGHT = True
-except Exception:  # pragma: no cover
-    _HAS_PLAYWRIGHT = False
 
 
 @register
@@ -86,25 +60,12 @@ class Screenshot(Module):
     async def _with_playwright(self, ctx: RunContext, targets, outdir) -> None:
         timeout = float(ctx.config.get("opsec.timeout", 20.0)) * 1000
         captured = 0
-        # Honour standard proxy env vars so screenshots work behind a corporate
-        # proxy (Chromium does not read these automatically).
-        proxy_url = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-                     or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
-                     or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy"))
-        proxy = {"server": proxy_url} if proxy_url else None
-        launch_args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
         async with async_playwright() as pw:
             try:
-                browser = await pw.chromium.launch(headless=True, args=launch_args, proxy=proxy)
-            except Exception as exc:  # noqa: BLE001 - browser build drift
-                exe = _find_chromium()
-                if not exe:
-                    self.log.warning("could not launch Chromium and none found on disk: %s", exc)
-                    return
-                self.log.info("using cached Chromium at %s", exe)
-                browser = await pw.chromium.launch(
-                    headless=True, args=launch_args, executable_path=exe, proxy=proxy
-                )
+                browser = await launch_chromium(pw)
+            except Exception as exc:  # noqa: BLE001 - no usable browser
+                self.log.warning("could not launch Chromium: %s", exc)
+                return
             sem = asyncio.Semaphore(min(int(ctx.config.get("opsec.max_concurrency", 20)), 6))
 
             async def shoot(asset):

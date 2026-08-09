@@ -53,3 +53,16 @@ def setup_logging(level: str = "info", logfile: str | Path | None = None) -> log
 def get_logger(module: str | None = None) -> logging.Logger:
     base = logging.getLogger(_LOGGER_NAME)
     return base.getChild(module) if module else base
+
+
+def set_console_level(level: str) -> None:
+    """Raise/lower the console handler's level without touching file logging.
+
+    Used to quiet per-module INFO chatter while the live display owns the screen.
+    """
+    lvl = getattr(logging, level.upper(), logging.WARNING)
+    logger = logging.getLogger(_LOGGER_NAME)
+    for handler in logger.handlers:
+        if not isinstance(handler, logging.FileHandler):
+            handler.setLevel(lvl)
+

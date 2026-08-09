@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
         "log_level": "info",
         "user_agent": "VoidRecon/0.1 (+https://github.com/CypherNova1337/VoidRecon)",
         "wildcard_apex": True,   # a bare apex in scope covers subdomains
+        "sqlite": True,          # append each run to <output_base>/voidrecon.db
     },
     "opsec": {
         # Passive is always allowed. Active interaction is off unless explicitly
@@ -45,6 +46,25 @@ DEFAULTS: dict[str, Any] = {
         "follow_redirects": True,
         "max_redirects": 5,
     },
+    "auth": {
+        # Authenticated-session material sent on every active request. Lets the
+        # crawler, API discovery, fuzzer, etc. reach behind a login.
+        "headers": {},   # e.g. {"Authorization": "Bearer <token>"}
+        "cookies": {},   # e.g. {"session": "<value>"}
+        # Optional scripted browser login run once at start; captured cookies are
+        # merged into 'cookies'. Requires Playwright.
+        "login": {},     # {url, username, password, [username_selector, password_selector,
+                         #  submit_selector, success_text]}
+    },
+    "dns": {
+        # Trusted resolvers for all DNS modules. Empty -> bundled list (dns-helix).
+        "resolvers": [],
+    },
+    "oob": {
+        # Out-of-band interaction domain (e.g. an interactsh domain you control).
+        # Enables blind SSRF testing: VoidRecon injects callbacks; you watch the listener.
+        "domain": None,
+    },
     "modules": {
         # Per-module enable flags and options are merged in here.
         "disabled": [],
@@ -59,6 +79,8 @@ DEFAULTS: dict[str, Any] = {
         "shodan_api_key": None,
         "securitytrails_api_key": None,
         "virustotal_api_key": None,
+        "censys_api_id": None,
+        "censys_api_secret": None,
     },
     "intel": {
         "llm_enabled": False,
@@ -70,6 +92,11 @@ DEFAULTS: dict[str, Any] = {
     },
     "reporting": {
         "formats": ["json", "markdown", "html"],
+    },
+    "notify": {
+        # Optional completion notification to a Slack or Discord webhook.
+        "webhook": None,            # prefer env: VOIDRECON_NOTIFY_WEBHOOK
+        "min_severity": "high",     # only ping if a finding at/above this severity exists
     },
 }
 

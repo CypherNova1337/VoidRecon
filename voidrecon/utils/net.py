@@ -77,8 +77,11 @@ def registrable_domain(host: str) -> str:
         return host
     if _EXTRACT is not None:
         ext = _EXTRACT(host)
-        if ext.registered_domain:
-            return ext.registered_domain
+        # tldextract renamed 'registered_domain' -> 'top_domain_under_public_suffix';
+        # prefer the new attribute, fall back for older versions.
+        reg = getattr(ext, "top_domain_under_public_suffix", None) or getattr(ext, "registered_domain", "")
+        if reg:
+            return reg
     labels = host.split(".")
     if len(labels) <= 2:
         return host

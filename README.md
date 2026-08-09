@@ -18,7 +18,7 @@
 
 > 🚧 **Work in progress.** VoidRecon is under active development and interfaces/defaults may change between releases. The engine and all core capabilities below are functional today.
 
-VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, and an extensible module system.
+VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and relentlessly focused on the forgotten corners** that cookie-cutter checklists skip. It is not "run three tools in a pipe." It is a full recon engine with a scope conscience, a scoring brain, a **live progress checklist**, resumable runs, a SQLite datastore with a web UI, and an extensible module system.
 
 > ⚠️ **Authorized use only.** VoidRecon is built for bug bounty programs and sanctioned penetration tests. Passive collection is on by default; anything that *touches the target* is gated behind an explicit `--active` flag **and** a positive in-scope check. You are responsible for staying within your authorization and the law.
 
@@ -39,13 +39,13 @@ VoidRecon runs as ordered **phases**, each populating a shared, de-duplicated da
 
 | Phase | What happens | Touches target? |
 |-------|--------------|-----------------|
-| **scope** | Org footprint: ASN + netblock mapping from seed domains (shared-CDN ASNs are recognised and not mis-claimed) | No (routing registries) |
-| **passive** | Cert transparency, aggregated passive DNS, web archives, GitHub dorking, cloud-bucket discovery | No (third-party data) |
-| **resolve** | DNS resolution → live IPs + CNAME chains (feeds takeover detection) | No (recursive resolvers) |
-| **active** | HTTP(S) probing/fingerprinting, high-value port discovery | **Yes** — gated |
-| **content** | Native crawler (links/forms/params, robots & sitemap mining), JavaScript secret/endpoint mining, favicon-hash & tracking-ID pivoting, screenshotting | **Yes** — gated |
-| **vuln** | Native version→CVE correlation (local dataset), template scanning, exposed-app flags | **Yes** — gated |
-| **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), optional LLM analysis | No |
+| **scope** | Org footprint: ASN + netblock mapping (shared-CDN ASNs recognised, not mis-claimed), RDAP registration intel (registrar/registrant/NS) | No (routing registries) |
+| **passive** | Cert transparency, aggregated passive DNS (crt.sh, certspotter, OTX, anubis, urlscan, Censys, +key sources), web archives, GitHub dorking, search-engine dork generation, cloud-bucket discovery, DNS/email records (SPF/DMARC/DKIM/CAA), zone-transfer (AXFR) + SPF-chain mining, reverse-IP hosting lookup, breach correlation (HaveIBeenPwned), Shodan host enrichment | No (third-party data) |
+| **resolve** | DNS resolution → live IPs + CNAME chains, wildcard-aware brute-force + altdns-style permutations, reverse-DNS (PTR) enrichment | No (recursive resolvers) |
+| **active** | HTTP(S) probing/fingerprinting, high-value port discovery, live TLS-certificate SAN harvesting | **Yes** — gated |
+| **content** | Native + SPA/XHR crawling, directory/file fuzzing (soft-404 aware), parameter discovery (reflected + accepted), virtual-host discovery, CSP/header host mining, deep tech fingerprinting, CMS enumeration (WordPress/Drupal/Joomla), JS secret/endpoint mining + source-map recovery, favicon-hash & tracking-ID pivoting (Shodan + Censys), API/spec discovery + deep GraphQL (introspection & suggestion harvesting), email harvesting, WAF/CDN detection, origin-IP discovery, HTTP method auditing, screenshotting | **Yes** — gated |
+| **vuln** | Native version→CVE correlation, subdomain-takeover verification, SQLi (error/boolean) + SSRF (OOB) + prototype-pollution + SSTI/CRLF/XSS/cache-deception probing, open-redirect confirmation, vuln-hint URL classification, JWT analysis, security-header/CORS/cookie analysis, template scanning, exposed-app flags | **Yes** — gated |
+| **intel** | Scoring, correlation (host/favicon/tracker clusters, dangling records, dense netblocks), **the Advisor** (ranked next-step plan), optional LLM analysis | No |
 
 Re-run over time and use `voidrecon diff` to surface exactly what changed between runs — the moment a new subdomain, service, or finding appears.
 
@@ -63,6 +63,24 @@ pip install -e ".[full]"    # + optional accelerators (tldextract, mmh3, bs4)
 Requires Python 3.10+. Core dependencies: `httpx`, `PyYAML`, `rich`, `dnspython`.
 
 ## Quickstart
+
+**New to it? Just run the wizard** — it asks a few questions and does the rest:
+
+```bash
+voidrecon wizard
+```
+
+Or pick a one-word **profile** instead of memorising flags:
+
+```bash
+voidrecon run example.com --profile passive   # quiet OSINT only (default posture)
+voidrecon run example.com --profile quick     # active, fast, essentials
+voidrecon run example.com --profile standard  # active, default depth
+voidrecon run example.com --profile deep      # active, every module
+voidrecon run example.com --profile stealth   # active, very slow & quiet
+```
+
+Full control is still there:
 
 ```bash
 # Quiet, passive-only recon (the default)
@@ -90,6 +108,18 @@ voidrecon run --url https://hackerone.com/example --import-scope
 # Compare the two most recent runs for a target (what changed?)
 voidrecon diff example.com
 
+# Build an HTML trend dashboard across all runs of a target
+voidrecon dashboard example.com
+
+# Refresh the local CVE signature dataset from an external feed
+voidrecon update-cve https://example.com/voidrecon-cve.json
+
+# Resume an interrupted run exactly where it stopped
+voidrecon run example.com --resume example.com-20260809-184438
+
+# Browse all runs, assets, and findings in a local web UI
+voidrecon serve            # http://127.0.0.1:8787
+
 # Inspect available modules / verify how a host classifies against your scope
 voidrecon modules
 voidrecon scope example.com --include "*.example.com" --check dev.example.com
@@ -100,7 +130,11 @@ Scope import uses the platform API when credentials are present (HackerOne:
 falls back to best-effort parsing otherwise. It never probes the target and never
 widens scope silently — it prints exactly what it imported.
 
-Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table.
+While a run is in progress, VoidRecon shows a **live checklist** in the terminal — every planned module grouped by phase, each with a live status (pending / running / done / error), its elapsed time and assets added, plus running totals of the surface and findings. Disable it with `--no-live` (it's automatically off in pipes/CI). Detailed per-module logs still stream to `runs/<run>/voidrecon.log`.
+
+Runs are **resumable**: after every module the datastore is checkpointed, so `--resume <run_id>` reloads it and continues from the next unfinished module — no lost hours if a scan is interrupted.
+
+Output lands in `runs/<target>-<timestamp>/` as **JSON** (machine-readable), **Markdown** (operator report), and a self-contained **HTML** report with a prioritised target table and screenshot gallery. Every run is also appended to a shared SQLite database (`runs/voidrecon.db`) that powers `voidrecon diff`, `voidrecon dashboard`, and the `voidrecon serve` web UI.
 
 ### Aggressive mode
 
@@ -157,21 +191,82 @@ export VOIDRECON_SOURCES_GITHUB_TOKEN=ghp_xxx          # enables GitHub dorking
 export VOIDRECON_SOURCES_SECURITYTRAILS_API_KEY=xxx    # enriches passive DNS
 export VOIDRECON_SOURCES_VIRUSTOTAL_API_KEY=xxx
 export VOIDRECON_SOURCES_SHODAN_API_KEY=xxx            # favicon-hash pivoting
+export VOIDRECON_SOURCES_CENSYS_API_ID=xxx             # extra passive subdomain source
+export VOIDRECON_SOURCES_CENSYS_API_SECRET=xxx
 export VOIDRECON_SOURCES_HACKERONE_USERNAME=xxx        # scope import (with token)
 export VOIDRECON_SOURCES_HACKERONE_TOKEN=xxx
 ```
 
+### Authenticated sessions
+
+Reach behind a login so the crawler, fuzzer, API discovery, and analysis modules
+test authenticated surface. Credentials attach to every active request (and the
+SPA crawler replays headers in the browser):
+
+```bash
+voidrecon run app.example.com --active \
+  --bearer "eyJhbGci..." \
+  --header "X-Api-Key: abc123" \
+  --cookie "session=deadbeef"
+```
+
+### Authenticated login automation
+
+Point VoidRecon at a login form and it logs in with a headless browser once, then
+reuses that session for every active module (crawler, fuzzer, param/GraphQL/JWT,
+etc.) — where access-control and IDOR bugs actually live:
+
+```bash
+voidrecon run app.example.com --active \
+  --login-url https://app.example.com/login \
+  --login-user analyst@example.com --login-pass 'hunter2'
+```
+
+Custom field selectors and a success check can be set under `auth.login` in config.
+It captures whatever cookies the flow sets, so many OAuth-backed logins work too.
+
+### Distributed runs (queue + workers)
+
+Drain a big target list across many parallel workers (processes on one box, or
+machines sharing the queue DB), all writing into one datastore:
+
+```bash
+voidrecon queue add a.com b.com c.com --active     # enqueue
+voidrecon queue list                               # inspect
+voidrecon worker &   voidrecon worker &            # N workers drain it in parallel
+voidrecon worker --poll 60                         # keep waiting for new jobs
+```
+
+Job claiming is atomic (SQLite WAL + guarded update), so no two workers take the
+same target.
+
+### Completion notifications
+
+Point a Slack or Discord webhook at a long run and VoidRecon pings you when it
+finishes, with the headline numbers and top findings (only if something at or
+above `notify.min_severity` turned up):
+
+```bash
+voidrecon run example.com --aggressive --yes \
+  --notify-webhook https://hooks.slack.com/services/XXX/YYY/ZZZ
+# or set VOIDRECON_NOTIFY_WEBHOOK in the environment
+```
+
 Everything works without any keys — configured sources simply add depth.
 
-## The intelligence layer
+## Intelligence & AI
 
-The heuristic scorer is always on and offline. To add model-assisted analysis:
+VoidRecon has a three-tier brain, and the first two need no key and no network:
+
+1. **Scoring** — every asset gets a "juiciness" score (dev/admin/API/exposed signals, risky ports, dangling records, secrets), so the report leads with what matters.
+2. **The Advisor** — reads all findings and produces a ranked, plain-English **next-step plan** with the assets involved and a ready-to-run command for each ("Verify subdomain takeovers → `voidrecon run … --only dns_resolve,takeover_verify`"). It prints at the end of every run and headlines the report.
+3. **LLM analysis (optional)** — a provider-agnostic model layer that reasons over the top surface and augments the plan. Enable it with `--ai`:
 
 ```bash
 export VOIDRECON_LLM_API_KEY=sk-...
-voidrecon run example.com --llm --llm-provider openai --llm-model gpt-4o-mini
-# or, fully local:
-voidrecon run example.com --llm --llm-provider ollama --llm-model llama3.1
+voidrecon run example.com --ai --llm-provider openai --llm-model gpt-4o-mini
+# or fully local, no data leaves your machine:
+voidrecon run example.com --ai --llm-provider ollama --llm-model llama3.1
 ```
 
 The model receives a compact digest of the top-scoring assets and returns a summary, prioritised targets with suggested checks, thematic clusters, and anything the numeric scoring under-weighted. It is advisory only and **never triggers network actions on its own**.
@@ -208,7 +303,7 @@ voidrecon/
 ├── intel/                 # scoring, correlation, provider-agnostic LLM layer
 ├── modules/               # auto-discovered recon modules (passive/active/content/vuln)
 ├── reporting/             # JSON / Markdown / HTML report generation
-├── data/                  # bundled datasets (CVE signatures)
+├── data/                  # bundled datasets (CVE signatures, subdomain wordlist)
 └── utils/                 # domain/IP parsing, secret patterns, hashing, version compare
 configs/default.yaml       # default configuration
 tests/                     # pytest suite
@@ -224,16 +319,64 @@ hundreds of hosts at a glance. Install the backend with `pip install -e ".[scree
 
 ## Roadmap
 
-VoidRecon now ships with the complete engine plus deep passive/OSINT, org
-footprinting, active probing & port discovery, a native crawler, JS secret/endpoint
-mining, favicon-hash & tracking-ID pivoting, cloud-bucket discovery, native
-CVE correlation, screenshotting, and run-to-run diffing. Still growing:
+VoidRecon ships with the complete engine plus deep passive/OSINT, org
+footprinting, DNS/email-security analysis, breach correlation, wildcard-aware
+subdomain brute-force & permutations, reverse-DNS, active probing & port
+discovery, native + SPA/XHR crawling, JS secret/endpoint mining, API/spec/GraphQL
+discovery, email harvesting, favicon-hash & tracking-ID pivoting (Shodan +
+Censys), WAF/CDN detection, cloud-bucket discovery, native CVE correlation with
+an auto-refreshable dataset, security-header/CORS/cookie analysis, screenshotting,
+SQLite persistence, run-to-run diffing, trend dashboards, and completion webhooks.
+Still growing:
 
-- Expanded CVE signature dataset and auto-refresh from public feeds
-- Headless-browser-aware (XHR/SPA) crawling in the native crawler
-- Censys pivoting alongside Shodan
-- Passive credential-leak correlation
-- Historical trend dashboards across many runs
+- Expanded/curated CVE + fingerprint datasets (bundled feeds)
+- More injection classes (SQLi confirmation, SSRF OOB, prototype pollution)
+- Passive credential/token validation workflows
+- A richer web UI (filtering, cross-run views) over the datastore
+
+## Docker
+
+The image bundles VoidRecon with the binaries it orchestrates (dns-helix,
+paramvoid, subfinder, httpx, dnsx, katana, nuclei, gau) and a headless browser,
+so the hybrid fast-path works out of the box:
+
+```bash
+docker build -t voidrecon .
+docker run --rm -it -v "$PWD/runs:/runs" voidrecon run example.com
+docker run --rm -it -v "$PWD/runs:/runs" voidrecon run example.com --aggressive --yes
+```
+
+Output is written to the mounted `/runs` volume. Pass API keys with `-e`, e.g.
+`-e VOIDRECON_SOURCES_SHODAN_API_KEY=...`.
+
+## Development
+
+```bash
+make setup    # editable install with dev + full extras (or: ./scripts/setup.sh)
+make test     # pytest
+make lint     # ruff
+make run      # CLI help
+```
+
+CI (GitHub Actions) runs ruff + pytest on Python 3.10–3.12 for every push and PR.
+
+## Integrations & credits
+
+VoidRecon works standalone, but plays well with best-in-class tooling from the
+VoidSec-Hub arsenal and the wider community — used automatically when present:
+
+- **[dns-helix](https://github.com/CypherNova1337/dns-helix)** — its recommended
+  resolver list is bundled and used for fast, reliable resolution/brute-force; the
+  `dns-helix` binary is orchestrated when installed.
+- **[paramvoid](https://github.com/CypherNova1337/paramvoid)** — its parameter
+  wordlist ships with VoidRecon and the `paramvoid` binary is used for parameter
+  discovery when installed.
+- **[GF_Patterns](https://github.com/CypherNova1337/GF_Patterns)** — its
+  vulnerability parameter sets power the `vuln_hints` URL classifier.
+- ProjectDiscovery (`subfinder`, `httpx`, `naabu`, `nuclei`, `katana`), `gau`,
+  `gospider`, `gowitness`, `amass` — orchestrated when on `PATH`.
+
+Everything degrades gracefully when a tool or key is absent — nothing is required.
 
 ## Contributing
 

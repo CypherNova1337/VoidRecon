@@ -40,6 +40,8 @@ class HttpClient:
         follow_redirects: bool = True,
         max_redirects: int = 5,
         rotate_user_agents: bool = True,
+        auth_headers: dict | None = None,
+        auth_cookies: dict | None = None,
     ):
         self._default_ua = user_agent
         self._rotate = rotate_user_agents
@@ -47,13 +49,18 @@ class HttpClient:
         self._limiter = RateLimiter(rate=rate, jitter=jitter)
         self._guard = ConcurrencyGuard(concurrency)
         limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
+        base_headers = {"User-Agent": user_agent, "Accept": "*/*"}
+        if auth_headers:
+            # Authenticated-session headers (Authorization, custom) sent on every request.
+            base_headers.update(auth_headers)
         self._client = httpx.AsyncClient(
             timeout=timeout,
             verify=verify_tls,
             follow_redirects=follow_redirects,
             max_redirects=max_redirects,
             limits=limits,
-            headers={"User-Agent": user_agent, "Accept": "*/*"},
+            headers=base_headers,
+            cookies=auth_cookies or None,
         )
 
     def _ua(self) -> str:
@@ -80,6 +87,10 @@ class HttpClient:
                 attempt += 1
             except httpx.HTTPError as exc:
                 log.debug("http error: %s %s (%s)", method, url, exc)
+                return None
+            except (ValueError, TypeError) as exc:
+                # Malformed URL / unsupported scheme must never crash a module.
+                log.debug("bad request skipped: %s %s (%s)", method, url, exc)
                 return None
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response | None:

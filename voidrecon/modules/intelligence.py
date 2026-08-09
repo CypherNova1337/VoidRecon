@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from voidrecon.core.context import RunContext
 from voidrecon.core.module import Module, Phase, register
+from voidrecon.intel import advisor
 from voidrecon.intel import correlate as correlate_mod
 from voidrecon.intel import scoring
 from voidrecon.intel.llm import LLMClient
@@ -33,6 +34,13 @@ class Intelligence(Module):
         top = scoring.top_assets(ctx.store, limit=10)
         if top:
             self.log.info("top target: %s (score %.0f)", top[0].value, top[0].score)
+
+        # Advisor: heuristic, always-on "what to do next" plan.
+        advice = advisor.recommend(ctx)
+        setattr(ctx.store, "advice", advice)
+        if advice:
+            self.log.info("advisor: %d recommended next step(s); top: %s",
+                          len(advice), advice[0]["action"])
 
         llm = LLMClient(ctx)
         if llm.enabled:
