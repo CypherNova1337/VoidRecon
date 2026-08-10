@@ -48,13 +48,15 @@ Results land in `runs/<target>-<timestamp>/` as JSON, Markdown, and a self-conta
 ## Install
 
 ```bash
-git clone https://github.com/CypherNova1337/VoidRecon && cd VoidRecon
+git clone -b voidsec-hub/bug-bounty-recon-kzbnsc https://github.com/CypherNova1337/VoidRecon
+cd VoidRecon
 pip install -e .              # core
 pip install -e ".[full]"      # + tldextract, cryptography (TLS SANs), bs4
 pip install -e ".[screenshots]"  # + Playwright (screenshots, SPA crawl, prototype-pollution)
 ```
 
-Python 3.10+. Core deps: `httpx`, `PyYAML`, `rich`, `dnspython`.
+Python 3.10+. Core deps: `httpx`, `PyYAML`, `rich`, `dnspython`. `voidrecon update`
+pulls the latest from this branch; set `VOIDRECON_UPDATE_BRANCH=main` once it's merged there.
 
 **Docker** (bundles the Go tools it orchestrates + a headless browser):
 

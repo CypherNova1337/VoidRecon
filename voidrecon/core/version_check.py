@@ -18,9 +18,20 @@ from voidrecon.core.paths import user_data_dir
 from voidrecon.utils.versions import is_newer
 from voidrecon.version import __version__
 
-_RAW_VERSION_URL = (
-    "https://raw.githubusercontent.com/CypherNova1337/VoidRecon/main/voidrecon/version.py"
-)
+_REPO = "CypherNova1337/VoidRecon"
+# Branch that carries the current code / releases. Override with VOIDRECON_UPDATE_BRANCH
+# (set this to "main" once the code is merged there).
+DEFAULT_BRANCH = "voidsec-hub/bug-bounty-recon-kzbnsc"
+
+
+def update_branch() -> str:
+    return os.environ.get("VOIDRECON_UPDATE_BRANCH", DEFAULT_BRANCH)
+
+
+def _raw_version_url() -> str:
+    return f"https://raw.githubusercontent.com/{_REPO}/{update_branch()}/voidrecon/version.py"
+
+
 _CACHE_TTL = 86400  # 24h
 _VER_RE = re.compile(r'__version__\s*=\s*["\']([0-9]+(?:\.[0-9]+)*)["\']')
 
@@ -54,7 +65,7 @@ def fetch_latest(timeout: float = 3.0) -> str | None:
     try:
         import httpx
 
-        resp = httpx.get(_RAW_VERSION_URL, timeout=timeout, follow_redirects=True)
+        resp = httpx.get(_raw_version_url(), timeout=timeout, follow_redirects=True)
         if resp.status_code == 200:
             m = _VER_RE.search(resp.text)
             if m:

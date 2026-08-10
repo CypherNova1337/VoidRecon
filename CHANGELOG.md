@@ -7,6 +7,14 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.2.0] — Umbra
+
+Everything since 0.1.0: 49 modules across all phases, the Advisor (keyless AI),
+profiles/wizard, authenticated sessions, distributed workers, live progress,
+resumable runs, SQLite + web UI + dashboard + diff, Docker, Telegram/Slack/Discord
+notifications, and the integrations with dns-helix / paramvoid / GF_Patterns.
+Highlights below.
+
 ### Fixed / improved (from live use)
 - **Live display no longer freezes:** the progress table auto-refreshes, so the
   elapsed timer keeps moving during long modules (e.g. dns_brute).
