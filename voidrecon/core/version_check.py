@@ -19,8 +19,7 @@ from voidrecon.utils.versions import is_newer
 from voidrecon.version import __version__
 
 _REPO = "CypherNova1337/VoidRecon"
-# Branch that carries the current code / releases. Override with VOIDRECON_UPDATE_BRANCH
-# (set this to "main" once the code is merged there).
+# Branch that carries releases. Override with VOIDRECON_UPDATE_BRANCH if needed.
 DEFAULT_BRANCH = "main"
 
 
