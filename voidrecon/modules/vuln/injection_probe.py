@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
+from voidrecon.utils.text import short_url
 
 def build_ssti_payloads():
     # Improbable product so a coincidental match in the page is unlikely.
@@ -104,7 +105,7 @@ class InjectionProbe(Module):
             resp = await ctx.http.get(self._mutate(url, param, payload))
             if resp is not None and expect in resp.text and payload not in resp.text:
                 ctx.add_finding(
-                    f"SSTI candidate: {url} (parameter '{param}')",
+                    f"SSTI candidate in '{param}' — {short_url(url)}",
                     module=self.name, severity=Severity.HIGH, confidence=Confidence.TENTATIVE,
                     asset=urlparse(url).hostname,
                     description=("A template-arithmetic payload was evaluated server-side (the product "
@@ -121,7 +122,7 @@ class InjectionProbe(Module):
         resp = await ctx.http.get(self._mutate(url, param, payload))
         if resp is not None and f'{marker}"><svg' in resp.text:
             ctx.add_finding(
-                f"Reflected XSS candidate: {url} (parameter '{param}')",
+                f"Reflected XSS candidate in '{param}' — {short_url(url)}",
                 module=self.name, severity=Severity.MEDIUM, confidence=Confidence.TENTATIVE,
                 asset=urlparse(url).hostname,
                 description=("HTML metacharacters were reflected unencoded into the response — the input "
@@ -138,7 +139,7 @@ class InjectionProbe(Module):
         resp = await ctx.http.get(self._mutate(url, param, payload))
         if resp is not None and crlf_detected(dict(resp.headers), marker):
             ctx.add_finding(
-                f"CRLF / header injection candidate: {url} (parameter '{param}')",
+                f"CRLF / header injection candidate in '{param}' — {short_url(url)}",
                 module=self.name, severity=Severity.MEDIUM, confidence=Confidence.LIKELY,
                 asset=urlparse(url).hostname,
                 description="An injected CRLF sequence produced a new response header — header/response splitting.",

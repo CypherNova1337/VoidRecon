@@ -19,6 +19,7 @@ import asyncio
 from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
+from voidrecon.utils.text import find_secrets, truncate
 
 # Query fragments appended to the target term. Kept high-signal and conservative.
 _DORKS = [
@@ -49,14 +50,15 @@ class GithubDork(Module):
             return
         headers = {
             "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
+            # text-match returns the matched code fragment so we can show what was found.
+            "Accept": "application/vnd.github.text-match+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         for seed in ctx.scope.seeds:
             await self._search_seed(ctx, seed, headers)
 
     async def _search_seed(self, ctx: RunContext, apex: str, headers: dict) -> None:
-        # repo -> {"hits": {url,...}, "dorks": {dork,...}, "owned": bool}
+        # repo -> {hits, dorks, fragments, owner}
         repos: dict[str, dict] = {}
         apex_label = apex.split(".")[0].lower()
         for dork in _DORKS:
@@ -71,40 +73,59 @@ class GithubDork(Module):
                     full = repo.get("full_name")
                     if not full or self._is_noise(full, repo):
                         continue
-                    rec = repos.setdefault(full, {"hits": set(), "dorks": set(), "owner": full.split("/")[0].lower()})
+                    rec = repos.setdefault(full, {"hits": set(), "dorks": set(),
+                                                  "fragments": [], "owner": full.split("/")[0].lower()})
                     if item.get("html_url"):
                         rec["hits"].add(item["html_url"])
                     if dork:
                         rec["dorks"].add(dork)
+                    for tm in item.get("text_matches", []) or []:
+                        frag = (tm.get("fragment") or "").strip()
+                        if frag and frag not in rec["fragments"]:
+                            rec["fragments"].append(frag)
             await asyncio.sleep(2.0)  # respect search secondary rate limits
 
-        secret_repos = 0
+        flagged = 0
         for full, rec in repos.items():
             ctx.add_asset(AssetKind.CODE_REPO, f"github.com/{full}", source=self.name,
                           confidence=Confidence.TENTATIVE, repo=full)
-            # Screen: only flag repos that hit a *secret-flavoured* dork, and rank
-            # repos owned by (or named after) the target higher.
             secret_dorks = {d for d in rec["dorks"] if d and d != "password"}
             if not secret_dorks:
                 continue
-            owned = apex_label in rec["owner"] or apex_label in full.split("/")[-1].lower()
-            secret_repos += 1
+            # What was actually found: scan the matched code fragments for real secrets.
+            real_secrets = []
+            for frag in rec["fragments"]:
+                real_secrets.extend(label for label, _ in find_secrets(frag))
+            real_secrets = sorted(set(real_secrets))
+            # Ownership: only the repo *owner* matching the org counts — a community
+            # repo merely named "hytale-*" does NOT belong to the target.
+            owned = apex_label == rec["owner"] or apex_label in rec["owner"].split("-")
+
+            if real_secrets:
+                sev, what = Severity.HIGH, f"live secret(s): {', '.join(real_secrets[:4])}"
+            elif owned:
+                sev, what = Severity.MEDIUM, f"secret-flavoured matches ({', '.join(sorted(secret_dorks)[:2])})"
+            else:
+                sev, what = Severity.LOW, f"third-party repo mentions {apex} ({', '.join(sorted(secret_dorks)[:2])})"
+            flagged += 1
+
+            sample = truncate(rec["fragments"][0], 240) if rec["fragments"] else "(no snippet returned)"
             ctx.add_finding(
-                f"GitHub: {full} references {apex} near secrets ({', '.join(sorted(secret_dorks)[:3])})",
-                module=self.name,
-                severity=Severity.MEDIUM if owned else Severity.LOW,
-                confidence=Confidence.TENTATIVE, asset=apex,
-                description=("A public repo references the target alongside sensitive keywords"
-                             + (" and appears to belong to the target org" if owned else "")
-                             + ". Review the matched files for real credentials/endpoints — "
-                             "search hits are leads, not confirmed leaks."),
-                evidence={"repo": full, "dorks": sorted(secret_dorks), "urls": sorted(rec["hits"])[:8],
-                          "url": next(iter(sorted(rec["hits"])), None)},
-                references=sorted(rec["hits"])[:5], tags={"github", "leak-candidate"},
+                f"GitHub — {what}: {full}",
+                module=self.name, severity=sev, confidence=Confidence.TENTATIVE, asset=apex,
+                description=(f"Matched in `{full}`" + (" (target-owned)" if owned else " (third-party)")
+                            + ". What matched:\n" + sample
+                            + "\nReview the file(s) — search hits are leads, not confirmed leaks."),
+                evidence={"repo": full, "owned": owned, "secret_types": real_secrets,
+                          "matched_dorks": sorted(secret_dorks), "snippet": sample,
+                          "urls": sorted(rec["hits"])[:6]},
+                references=sorted(rec["hits"])[:4],
+                tags={"github", "leak-candidate"} | ({"secret"} if real_secrets else set()),
             )
         if repos:
-            self.log.info("github: %d repo(s) mention %s (%d flagged after screening)",
-                          len(repos), apex, secret_repos)
+            self.log.info("github: %d repo(s) mention %s (%d flagged, %d with live secrets)",
+                          len(repos), apex, flagged,
+                          sum(1 for r in repos.values() if any(find_secrets(fr) for fr in r["fragments"])))
 
     @staticmethod
     def _is_noise(full: str, repo: dict) -> bool:

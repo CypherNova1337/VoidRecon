@@ -45,3 +45,24 @@ def find_secrets(blob: str) -> list[tuple[str, str]]:
 def truncate(text: str, limit: int = 200) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def short_url(url: str, limit: int = 80) -> str:
+    """A compact, readable form of a URL for titles/summaries.
+
+    Keeps scheme://host/path and collapses a long query to '?…' so a single
+    giant token (e.g. a login challenge) never floods the output.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        p = urlparse(url)
+    except Exception:
+        return url[:limit]
+    if not p.scheme:
+        return url if len(url) <= limit else url[: limit - 1] + "…"
+    base = f"{p.scheme}://{p.netloc}{p.path}"
+    if p.query:
+        first = p.query.split("&", 1)[0].split("=", 1)[0]
+        base += f"?{first}=…" if first else "?…"
+    return base if len(base) <= limit else base[: limit - 1] + "…"

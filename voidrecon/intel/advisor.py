@@ -98,7 +98,8 @@ def summarize(ctx) -> str:
         lines.append(f"Findings: {breakdown}.")
     highs = [f for f in findings if f.severity.rank >= 3]
     if highs:
-        named = "; ".join(f"{f.title}" for f in sorted(highs, key=lambda f: -f.severity.rank)[:5])
+        from voidrecon.utils.text import truncate
+        named = "; ".join(truncate(f.title, 90) for f in sorted(highs, key=lambda f: -f.severity.rank)[:5])
         lines.append(f"Most urgent: {named}.")
 
     # 3) Where to look first.

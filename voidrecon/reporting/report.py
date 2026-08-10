@@ -210,8 +210,9 @@ class Reporter:
                     lines.append("- **Where to test:**")
                     for u in ev_urls:
                         lines.append(f"    - `{u}`")
-                if f.references:
-                    lines.append(f"- Refs: {', '.join(f.references)}")
+                refs_extra = [r for r in f.references if r not in ev_urls]
+                if refs_extra:
+                    lines.append(f"- Refs: {', '.join(refs_extra)}")
                 lines.append("")
 
         if self._candidate_files:
@@ -280,8 +281,9 @@ class Reporter:
         findings_html = ""
         for f in findings:
             color = _SEV_COLOR.get(f.severity.value, "#546e7a")
-            refs = "".join(f'<a href="{esc(r)}" target="_blank">{esc(r)}</a> ' for r in f.references)
             ev_urls = self._evidence_urls(f)
+            refs = "".join(f'<a href="{esc(r)}" target="_blank">{esc(r)}</a> '
+                           for r in f.references if r not in ev_urls)
             where = ("<div class='where'><b>Where to test:</b><ul>"
                      + "".join(f"<li>{_link(u)}</li>" for u in ev_urls) + "</ul></div>") if ev_urls else ""
             findings_html += (

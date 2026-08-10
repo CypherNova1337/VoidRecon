@@ -18,6 +18,7 @@ import httpx
 from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
+from voidrecon.utils.text import short_url
 
 _REDIRECT_PARAMS = {
     "url", "redirect", "redirect_url", "redirect_uri", "redirect_to", "next", "next_page",
@@ -95,7 +96,7 @@ class OpenRedirect(Module):
             confirmed = True
         if confirmed:
             ctx.add_finding(
-                f"Open redirect: {url} (parameter '{param}')",
+                f"Open redirect in '{param}' — {short_url(url)}",
                 module=self.name, severity=Severity.MEDIUM, confidence=Confidence.CONFIRMED,
                 asset=parsed.hostname,
                 description=("The parameter redirects the browser to an attacker-controlled host. "

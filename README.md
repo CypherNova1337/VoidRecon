@@ -114,6 +114,27 @@ export VOIDRECON_NOTIFY_TELEGRAM_TOKEN=123:abc VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID
 
 ## Output & review
 
+Each run folder (`runs/<target>-<timestamp>/`) contains the JSON/Markdown/HTML report **plus ready-to-use candidate lists** — one file per vulnerability class, so you can feed a whole class straight into the right tool:
+
+```
+runs/<target>-<timestamp>/
+├── report.html / report.md / voidrecon.json
+├── dorks-<target>.html          # clickable Google/GitHub/Shodan dorks
+└── candidates/
+    ├── sqli.txt   xss.txt   ssrf.txt   lfi.txt   rce.txt
+    ├── redirect.txt  ssti.txt  idor.txt  ...
+```
+
+```bash
+# Pipe a whole class into the right tool — no copy/paste
+sqlmap -m runs/target.com-*/candidates/sqli.txt --batch
+cat runs/target.com-*/candidates/xss.txt   | dalfox pipe
+cat runs/target.com-*/candidates/lfi.txt   | nuclei -t lfi/
+cat runs/target.com-*/candidates/redirect.txt | while read u; do echo "$u"; done
+```
+
+And to browse/track results:
+
 ```bash
 voidrecon serve                 # web UI over the datastore (runs, findings, filter, search)
 voidrecon dashboard target.com  # HTML trend dashboard across runs

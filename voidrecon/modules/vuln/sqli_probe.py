@@ -115,8 +115,9 @@ class SqliProbe(Module):
         return False
 
     def _report(self, ctx, url, param, technique, evidence):
+        from voidrecon.utils.text import short_url
         ctx.add_finding(
-            f"SQL injection candidate ({technique}): {url} (parameter '{param}')",
+            f"SQL injection candidate ({technique}) in '{param}' — {short_url(url)}",
             module=self.name, severity=Severity.HIGH, confidence=Confidence.TENTATIVE,
             asset=urlparse(url).hostname,
             description=(f"The parameter shows {technique} SQL-injection behaviour. Confirm manually with "

@@ -27,6 +27,7 @@ from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
 from voidrecon.core.tools import run_tool
+from voidrecon.utils.text import short_url
 
 try:
     from importlib.resources import files as _res_files
@@ -132,7 +133,7 @@ class ParamDiscovery(Module):
                 ctx.add_asset(AssetKind.ENDPOINT, f"{url}?{p}=", source=self.name,
                               confidence=Confidence.CONFIRMED, has_params=True, reflected=True)
             ctx.add_finding(
-                f"Reflected parameter(s) on {url}: {', '.join(reflected[:12])}"
+                f"Reflected parameter(s) — {short_url(url)}: {', '.join(reflected[:12])}"
                 + (" …" if len(reflected) > 12 else ""),
                 module=self.name, severity=Severity.MEDIUM, confidence=Confidence.CONFIRMED,
                 asset=url,

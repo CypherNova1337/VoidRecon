@@ -7,6 +7,19 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Fixed / improved (from the Hytale field run)
+- **No more double links:** references that duplicate the "Where to test" URLs are
+  no longer rendered twice.
+- **GitHub findings now say what was found:** they include the matched code snippet
+  (via GitHub text-match), and screen it for real secrets — a live AWS/API key
+  elevates to HIGH, plain config stays LOW.
+- **No false ownership:** a community repo merely named ``<target>-*`` is labelled
+  third-party; only a matching repo *owner* is called target-owned.
+- **Cleaner titles / AI read:** long URLs in finding titles and the analyst read are
+  collapsed to ``host/path?param=…`` so a giant token never floods the output.
+- **README:** documents the per-class `candidates/*.txt` files with copy-paste
+  sqlmap/dalfox/nuclei pipelines.
+
 ## [0.2.0] — Umbra
 
 Everything since 0.1.0: 49 modules across all phases, the Advisor (keyless AI),
