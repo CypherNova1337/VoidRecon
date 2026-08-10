@@ -56,11 +56,16 @@ def _write_cache(latest: str) -> None:
         pass
 
 
-def fetch_latest(timeout: float = 3.0) -> str | None:
-    """Return the latest published version string, or None (best-effort, cached)."""
-    cached = _read_cache()
-    if cached:
-        return cached.get("latest")
+def fetch_latest(timeout: float = 3.0, force: bool = False) -> str | None:
+    """Return the latest published version string, or None (best-effort).
+
+    Uses a 24h cache for the passive startup check; pass ``force=True`` (the
+    explicit ``voidrecon update``) to always re-fetch and refresh the cache.
+    """
+    if not force:
+        cached = _read_cache()
+        if cached:
+            return cached.get("latest")
     try:
         import httpx
 

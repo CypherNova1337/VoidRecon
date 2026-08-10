@@ -7,6 +7,13 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.3.1]
+
+### Fixed
+- **`voidrecon update` stale-cache bug:** the updater re-fetches the latest version
+  (bypassing the 24h cache) instead of reporting a cached "up to date" forever.
+  Combined with 0.3.0's "always pull" fix, `voidrecon update` now reliably upgrades.
+
 ## [0.3.0] — Wraith
 
 ### Fixed / improved (from the Hytale field run)

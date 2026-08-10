@@ -816,7 +816,7 @@ def _cmd_update(args) -> int:
     from voidrecon.core.version_check import update_branch
     from voidrecon.utils.versions import is_newer
 
-    latest = version_check.fetch_latest(timeout=6.0)
+    latest = version_check.fetch_latest(timeout=6.0, force=True)  # bypass the 24h cache
     if latest is None:
         print("could not determine the latest version (offline?).", file=sys.stderr)
     elif is_newer(latest, __version__):
