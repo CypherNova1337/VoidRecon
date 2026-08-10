@@ -825,15 +825,17 @@ def _cmd_update(args) -> int:
     if getattr(args, "check", False):
         return 0
 
+    from voidrecon.core.version_check import update_branch
+
+    branch = update_branch()
     # Prefer 'git pull' inside a checkout, else pip upgrade from GitHub.
     repo_root = _P(__file__).resolve().parents[1]
     if (repo_root / ".git").exists():
-        print(f"updating via git in {repo_root} …")
-        rc = subprocess.call(["git", "-C", str(repo_root), "pull", "--ff-only"])
-        return rc
-    print("updating via pip from GitHub …")
+        print(f"updating via git in {repo_root} (branch {branch}) …")
+        return subprocess.call(["git", "-C", str(repo_root), "pull", "--ff-only"])
+    print(f"updating via pip from GitHub (branch {branch}) …")
     return subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade",
-                            "git+https://github.com/CypherNova1337/VoidRecon.git@main"])
+                            f"git+https://github.com/CypherNova1337/VoidRecon.git@{branch}"])
 
 
 def _cmd_wizard(args) -> int:
