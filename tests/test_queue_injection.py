@@ -54,3 +54,52 @@ def test_run_namespace_defaults():
     assert ns.aggressive is True
     assert ns.no_live is True and ns.yes is True   # worker-safe defaults
     assert ns.resume is None
+
+
+def test_read_targets_file_strips_scheme(tmp_path):
+    from voidrecon.cli import _read_targets_file
+
+    f = tmp_path / "targets.txt"
+    f.write_text(
+        "https://example.com\n"
+        "http://app.example.com/login?next=/dashboard\n"
+        "example.org\n"
+        "HTTPS://Example.Com/          # dup after normalisation\n"
+        "# a full-line comment\n"
+        "sub.test.io:8443\n"
+        "1.2.3.4\n"
+        "  spaced.example.net  \n"
+        "foo.com, bar.com\n"
+    )
+    got = _read_targets_file(str(f))
+    # every entry is a bare host: scheme, path, query, port and case are stripped
+    assert got == [
+        "example.com",
+        "app.example.com",
+        "example.org",
+        "sub.test.io",
+        "1.2.3.4",
+        "spaced.example.net",
+        "foo.com",
+        "bar.com",
+    ]
+
+
+def test_read_targets_file_missing(tmp_path):
+    import pytest
+
+    from voidrecon.cli import _read_targets_file
+
+    with pytest.raises(FileNotFoundError):
+        _read_targets_file(str(tmp_path / "nope.txt"))
+
+
+def test_targets_file_feeds_scope(tmp_path):
+    from voidrecon.cli import _build_scope, _run_namespace
+
+    f = tmp_path / "t.txt"
+    f.write_text("https://example.com/path\napp.example.org\n")
+    ns = _run_namespace(targets=[], targets_file=str(f))
+    scope = _build_scope(ns, wildcard_apex=True)
+    assert "example.com" in scope.seeds
+    assert scope.classify_host("app.example.org").value == "in_scope"

@@ -97,6 +97,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # run -----------------------------------------------------------------
     run = sub.add_parser("run", help="Run a reconnaissance engagement")
     run.add_argument("targets", nargs="*", help="Seed apex domains / IPs / CIDRs (also treated as in-scope)")
+    run.add_argument("-T", "--targets-file",
+                     help="File of targets, one per line (any http/https prefix is stripped to the "
+                          "bare host). Merged with any targets given on the command line.")
     run.add_argument("-u", "--url", help="Program/policy URL (recorded for reference)")
     run.add_argument(
         "--import-scope", action="store_true",
@@ -241,10 +244,41 @@ def _load_scope_file(path: str) -> tuple[list[str], list[str]]:
     return include, exclude
 
 
+def _read_targets_file(path: str) -> list[str]:
+    """Read a plain target list — one entry per line — and normalise each to a
+    bare host.
+
+    Accepts any text file. Every form of the same target reduces to the host:
+    ``https://example.com/login`` and ``http://example.com`` both become
+    ``example.com``, so a list exported with scheme prefixes runs identically to
+    one written as bare apexes. Blank lines, ``#`` comments, commas and
+    surrounding whitespace are tolerated; duplicates are dropped in order.
+    """
+    import os
+
+    from voidrecon.utils import net
+
+    p = Path(os.path.expanduser(path))
+    if not p.exists():
+        raise FileNotFoundError(f"targets file not found: {path}")
+    out: list[str] = []
+    for raw in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        # drop a whole-line or trailing '# comment' before tokenising
+        line = raw.split("#", 1)[0]
+        # allow a single line to carry several comma/space-separated entries too
+        for token in line.replace(",", " ").split():
+            host = net.normalize_host(token.strip())
+            if host:
+                out.append(host)
+    return net.dedupe_preserve(out)
+
+
 def _build_scope(args, wildcard_apex: bool) -> Scope:
     include = list(args.include)
     exclude = list(args.exclude)
     include += list(getattr(args, "targets", []) or [])
+    if getattr(args, "targets_file", None):
+        include += _read_targets_file(args.targets_file)
     if getattr(args, "scope_file", None):
         inc, exc = _load_scope_file(args.scope_file)
         include += inc
@@ -654,7 +688,8 @@ def _run_namespace(**over):
     import argparse
 
     defaults = dict(
-        targets=[], url=None, import_scope=False, include=[], exclude=[], scope_file=None,
+        targets=[], targets_file=None, url=None, import_scope=False, include=[], exclude=[],
+        scope_file=None,
         active=False, aggressive=False, yes=True, phases=None, only=None, config=None,
         output_dir=None, rps=None, concurrency=None, timeout=None, no_verify_tls=False,
         header=[], cookie=[], bearer=None, login_url=None, login_user=None, login_pass=None,
@@ -844,10 +879,31 @@ def _cmd_wizard(args) -> int:
     print(_BANNER)
     print("VoidRecon guided setup — press Enter to accept the [default].\n")
     try:
-        target = input("  Target domain(s), space-separated: ").strip()
-        if not target:
+        raw = input("  Target domain(s), space-separated — or a path to a list file: ").strip()
+        if not raw:
             print("no target given.", file=sys.stderr)
             return 2
+        # If the whole entry points at a file, treat it as a target list (one per
+        # line, any http/https prefixes and paths stripped to bare hosts).
+        import os
+
+        candidate = os.path.expanduser(raw.strip("'\""))
+        if Path(candidate).is_file():
+            targets = _read_targets_file(candidate)
+            if not targets:
+                print(f"no usable targets found in {candidate}.", file=sys.stderr)
+                return 2
+            print(f"  Loaded {len(targets)} target(s) from {candidate}: "
+                  f"{', '.join(targets[:5])}" + (" …" if len(targets) > 5 else ""))
+        else:
+            # normalise typed entries too, so pasting a URL works the same way
+            from voidrecon.utils import net
+            targets = net.dedupe_preserve(
+                h for h in (net.normalize_host(t) for t in raw.split()) if h
+            )
+            if not targets:
+                print("no usable target given.", file=sys.stderr)
+                return 2
         print("\n  Intensity:")
         print("    1) passive   (quiet OSINT only — always safe)")
         print("    2) quick     (active, fast, essentials)")
@@ -864,9 +920,10 @@ def _cmd_wizard(args) -> int:
         return 130
 
     active = profile != "passive"
-    print(f"\n→ voidrecon run {target} --profile {profile}" + (" --ai" if ai else ""))
+    shown = " ".join(targets[:3]) + (" …" if len(targets) > 3 else "")
+    print(f"\n→ voidrecon run {shown} --profile {profile}" + (" --ai" if ai else ""))
     run_args = _run_namespace(
-        targets=target.split(),
+        targets=targets,
         include=scope_extra.split() if scope_extra else [],
         profile=profile, active=active, ai=ai,
         no_live=False, no_banner=True, yes=True,

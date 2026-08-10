@@ -7,6 +7,17 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.3.3]
+
+### Added
+- **Target list files.** The wizard now accepts a path to a text file (one target
+  per line) in place of typed domains, and `voidrecon run` gained
+  `--targets-file/-T`. Any `http://`/`https://` prefix, path, query, port and
+  case are stripped to the bare host, so a list exported as
+  `https://example.com/login` runs identically to `example.com`. Blank lines,
+  `#` comments (whole-line or trailing), and comma/space-separated entries are
+  tolerated; duplicates collapse in order.
+
 ## [0.3.2]
 
 ### Fixed / improved (from the Hytale field run)

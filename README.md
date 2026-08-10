@@ -33,6 +33,11 @@ pip install -e .          # or: pip install -e ".[full]"  for every optional fea
 voidrecon wizard          # interactive — asks a few questions, then runs
 ```
 
+The wizard takes either domains typed inline **or a path to a list file** — any
+text file with one target per line. Prefixes and paths are stripped
+automatically, so a list exported as `https://example.com/login` runs exactly
+like a bare `example.com`.
+
 Prefer flags? Pick a one-word **profile**:
 
 ```bash
@@ -41,6 +46,8 @@ voidrecon run target.com --profile quick      # active, fast, essentials
 voidrecon run target.com --profile standard   # active, default depth
 voidrecon run target.com --profile deep       # active, every module
 voidrecon run target.com --profile stealth    # active, very slow & quiet
+
+voidrecon run --targets-file targets.txt --profile deep   # feed a whole list at once
 ```
 
 Results land in `runs/<target>-<timestamp>/` as JSON, Markdown, and a self-contained HTML report — and every run is appended to `runs/voidrecon.db` for diffing, dashboards, and the web UI.
