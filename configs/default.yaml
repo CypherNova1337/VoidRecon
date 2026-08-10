@@ -111,6 +111,8 @@ reporting:
   formats: [json, markdown, html]
 
 notify:
-  # Optional completion notification. Prefer env: VOIDRECON_NOTIFY_WEBHOOK
+  # Optional completion notifications — any/all channels. Prefer env vars or `setup`.
   webhook: null                 # Slack or Discord webhook URL (auto-detected)
+  telegram_token: null          # Telegram bot token  (env: VOIDRECON_NOTIFY_TELEGRAM_TOKEN)
+  telegram_chat_id: null        # Telegram chat id    (env: VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID)
   min_severity: high            # only notify if a finding at/above this severity exists

@@ -7,6 +7,16 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Added (setup, Telegram, keyless AI, version check)
+- **`voidrecon setup`:** interactive configuration of API keys and notifications,
+  saved to `~/.config/voidrecon/config.yaml` (now auto-loaded on every run).
+- **Telegram notifications:** alongside Slack/Discord (bot token + chat id).
+- **Keyless AI:** the Advisor now writes a natural-language "analyst read" and
+  attack-path chaining — real intelligence with no LLM key and no API limits; the
+  optional LLM only augments it.
+- **Version check:** startup notice when a newer version exists (cached, best-effort,
+  `--no-update-check` to disable) plus a `voidrecon update` command (git/pip).
+
 ### Added (usability, the Advisor, injection refinements)
 - **The Advisor:** an always-on, heuristic "what to do next" planner — ranks
   findings into concrete next steps with the assets involved and ready-to-run

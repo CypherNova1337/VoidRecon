@@ -121,6 +121,12 @@ class Reporter:
                     lines.append(f"- **{t.get('asset','?')}** — {t.get('why','')}" + (f" _(checks: {checks})_" if checks else ""))
                 lines.append("")
 
+        summary_txt = getattr(self.store, "advice_summary", "")
+        if summary_txt:
+            lines.append("## Analyst read")
+            lines.append(summary_txt)
+            lines.append("")
+
         advice = self._advice()
         if advice:
             lines.append("## Recommended next steps")
@@ -224,6 +230,9 @@ class Reporter:
             )
             gallery_html = f'<section><h2>Visual triage ({len(shots)})</h2><div class="gallery">{cells}</div></section>'
 
+        summary_txt = getattr(self.store, "advice_summary", "")
+        summary_html = (f'<section><h2>Analyst read</h2><p>{esc(summary_txt)}</p></section>'
+                        if summary_txt else "")
         advice = self._advice()
         advice_html = ""
         if advice:
@@ -292,6 +301,7 @@ class Reporter:
 </header>
 <main>
   <section><h2>Attack surface</h2><div class="cards">{cards}</div></section>
+  {summary_html}
   {advice_html}
   {llm_html}
   <section><h2>Findings</h2>{findings_html}</section>

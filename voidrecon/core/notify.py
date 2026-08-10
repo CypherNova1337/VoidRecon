@@ -48,25 +48,53 @@ async def send(ctx, summary: dict) -> bool:
     import os
 
     webhook = os.environ.get("VOIDRECON_NOTIFY_WEBHOOK") or ctx.config.get("notify.webhook")
-    if not webhook:
+    tg_token = (os.environ.get("VOIDRECON_NOTIFY_TELEGRAM_TOKEN")
+                or ctx.config.get("notify.telegram_token"))
+    tg_chat = (os.environ.get("VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID")
+               or ctx.config.get("notify.telegram_chat_id"))
+    if not (webhook or (tg_token and tg_chat)):
         return False
 
     min_sev = str(ctx.config.get("notify.min_severity", "high"))
     threshold = _rank(min_sev)
-    has_qualifying = any(f.severity.rank >= threshold for f in ctx.store.findings())
-    if threshold > 0 and not has_qualifying:
+    if threshold > 0 and not any(f.severity.rank >= threshold for f in ctx.store.findings()):
         log.debug("no findings at/above %s — skipping notification", min_sev)
         return False
 
     text = build_summary(ctx, summary)
-    payload = {"content": text} if "discord.com" in webhook or "discordapp.com" in webhook else {"text": text}
+    sent = False
+    if webhook:
+        sent = await _send_webhook(ctx, webhook, text) or sent
+    if tg_token and tg_chat:
+        sent = await _send_telegram(ctx, tg_token, tg_chat, text) or sent
+    return sent
+
+
+async def _send_webhook(ctx, webhook: str, text: str) -> bool:
+    payload = {"content": text} if ("discord.com" in webhook or "discordapp.com" in webhook) else {"text": text}
     try:
         resp = await ctx.http.request("POST", webhook, json=payload,
                                       headers={"Content-Type": "application/json"})
         if resp is not None and resp.status_code < 400:
-            log.info("notification sent")
+            log.info("notification sent (webhook)")
             return True
         log.warning("notification webhook returned %s", getattr(resp, "status_code", "n/a"))
     except Exception as exc:  # noqa: BLE001
-        log.warning("notification failed: %s", exc)
+        log.warning("webhook notification failed: %s", exc)
+    return False
+
+
+async def _send_telegram(ctx, token: str, chat_id: str, text: str) -> bool:
+    try:
+        resp = await ctx.http.request(
+            "POST", f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True},
+            headers={"Content-Type": "application/json"},
+        )
+        if resp is not None and resp.status_code < 400:
+            log.info("notification sent (telegram)")
+            return True
+        log.warning("telegram returned %s", getattr(resp, "status_code", "n/a"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("telegram notification failed: %s", exc)
     return False

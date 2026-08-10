@@ -142,12 +142,20 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--resume", metavar="RUN_ID",
                      help="Resume an interrupted run by its id (reloads its checkpoint, skips completed modules)")
     run.add_argument("--no-live", action="store_true", help="Disable the live progress display")
+    run.add_argument("--no-update-check", action="store_true", help="Skip the check for a newer version")
     run.add_argument("-v", "--verbose", action="store_true", help="Verbose (debug) logging")
     run.add_argument("-q", "--quiet", action="store_true", help="Only warnings and errors")
     run.add_argument("--no-banner", action="store_true", help="Suppress the banner")
 
     # wizard --------------------------------------------------------------
     sub.add_parser("wizard", help="Interactive guided setup (asks a few questions, then runs)")
+
+    # setup ---------------------------------------------------------------
+    sub.add_parser("setup", help="Interactively configure API keys & notifications (saved to user config)")
+
+    # update --------------------------------------------------------------
+    up = sub.add_parser("update", help="Check for / install the latest version")
+    up.add_argument("--check", action="store_true", help="Only check, don't install")
 
     # modules -------------------------------------------------------------
     mods = sub.add_parser("modules", help="List available modules")
@@ -412,6 +420,14 @@ async def _run(args) -> int:
     if not args.no_banner and not args.quiet:
         print(_BANNER)
 
+    if not getattr(args, "no_update_check", False):
+        from voidrecon.core import version_check
+
+        newer = version_check.check()
+        if newer:
+            log.warning("[bold yellow]Update available:[/] VoidRecon %s is out "
+                        "(running %s) — run 'voidrecon update'", newer, __version__)
+
     aggressive = bool(cfg.get("opsec.aggressive", False))
     if aggressive and not _confirm_aggressive(scope, args.yes):
         print("aborted: aggressive mode not confirmed.", file=sys.stderr)
@@ -494,8 +510,11 @@ async def _run(args) -> int:
     for fmt, path in written.items():
         log.info("report (%s): %s", fmt, path)
 
-    # Advisor summary — the "what to do next" plan, front and centre.
+    # Advisor — the built-in analyst read + "what to do next" plan.
     advice = getattr(ctx.store, "advice", []) or []
+    summary_txt = getattr(ctx.store, "advice_summary", "")
+    if summary_txt and not args.quiet:
+        print(f"\n\033[1mAnalyst read:\033[0m {summary_txt}")
     if advice and not args.quiet:
         print("\n\033[1mRecommended next steps:\033[0m")
         for i, rec in enumerate(advice[:5], 1):
@@ -641,7 +660,7 @@ def _run_namespace(**over):
         header=[], cookie=[], bearer=None, login_url=None, login_user=None, login_pass=None,
         formats=None, notify_webhook=None, llm=False, llm_provider=None, llm_model=None,
         disable=[], resume=None, no_live=True, verbose=False, quiet=False, no_banner=True,
-        profile=None, ai=False,
+        profile=None, ai=False, no_update_check=True,
     )
     defaults.update(over)
     return argparse.Namespace(**defaults)
@@ -717,6 +736,106 @@ async def _cmd_worker(args) -> int:
     return 0
 
 
+def _cmd_setup(args) -> int:
+    """Interactively collect API keys + notifications into the user config file."""
+    try:
+        import yaml
+    except Exception:
+        print("error: PyYAML is required for setup", file=sys.stderr)
+        return 1
+    from voidrecon.core.paths import user_data_dir
+
+    print(_BANNER)
+    print("VoidRecon setup — configure optional API keys & notifications.")
+    print("Everything is optional; press Enter to skip. Values are saved to your user config.\n")
+
+    def ask(label, secret=False):
+        try:
+            val = input(f"  {label}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return ""
+        return val
+
+    print("── OSINT / enrichment API keys ──")
+    sources = {
+        "github_token": ask("GitHub token (code dorking)"),
+        "shodan_api_key": ask("Shodan API key (favicon pivot, host enrichment)"),
+        "censys_api_id": ask("Censys API ID"),
+        "censys_api_secret": ask("Censys API secret"),
+        "securitytrails_api_key": ask("SecurityTrails API key"),
+        "virustotal_api_key": ask("VirusTotal API key"),
+    }
+    print("\n── Notifications ──")
+    notify = {
+        "webhook": ask("Slack/Discord webhook URL"),
+        "telegram_token": ask("Telegram bot token"),
+        "telegram_chat_id": ask("Telegram chat id"),
+    }
+    print("\n── AI / LLM (optional; the heuristic Advisor always runs without this) ──")
+    provider = ask("LLM provider [openai|anthropic|ollama|none]") or "none"
+    intel = {}
+    if provider not in ("", "none"):
+        intel = {"llm_enabled": True, "llm_provider": provider,
+                 "llm_model": ask("LLM model (e.g. gpt-4o-mini, llama3.1)")}
+    print("\n── Out-of-band (blind SSRF) ──")
+    oob_domain = ask("OOB domain (e.g. your interactsh domain)")
+
+    cfg = {"sources": {k: v for k, v in sources.items() if v},
+           "notify": {k: v for k, v in notify.items() if v}}
+    if intel:
+        cfg["intel"] = intel
+    if oob_domain:
+        cfg["oob"] = {"domain": oob_domain}
+    cfg = {k: v for k, v in cfg.items() if v}
+
+    dest = user_data_dir() / "config.yaml"
+    existing = {}
+    if dest.exists():
+        try:
+            existing = yaml.safe_load(dest.read_text()) or {}
+        except Exception:
+            existing = {}
+    merged = {**existing, **cfg}
+    for section, vals in cfg.items():
+        if isinstance(vals, dict) and isinstance(existing.get(section), dict):
+            merged[section] = {**existing[section], **vals}
+    dest.write_text(yaml.safe_dump(merged, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    print(f"\nSaved to {dest}")
+    print("HackerOne scope import uses env vars: VOIDRECON_SOURCES_HACKERONE_USERNAME / _TOKEN")
+    print("These settings now apply automatically to every run.")
+    return 0
+
+
+def _cmd_update(args) -> int:
+    import subprocess
+    from pathlib import Path as _P
+
+    from voidrecon.core import version_check
+
+    latest = version_check.fetch_latest(timeout=6.0)
+    if latest is None:
+        print("could not determine the latest version (offline?).", file=sys.stderr)
+    else:
+        from voidrecon.utils.versions import is_newer
+        if not is_newer(latest, __version__):
+            print(f"VoidRecon is up to date (running {__version__}).")
+            return 0
+        print(f"Update available: {latest} (running {__version__}).")
+    if getattr(args, "check", False):
+        return 0
+
+    # Prefer 'git pull' inside a checkout, else pip upgrade from GitHub.
+    repo_root = _P(__file__).resolve().parents[1]
+    if (repo_root / ".git").exists():
+        print(f"updating via git in {repo_root} …")
+        rc = subprocess.call(["git", "-C", str(repo_root), "pull", "--ff-only"])
+        return rc
+    print("updating via pip from GitHub …")
+    return subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade",
+                            "git+https://github.com/CypherNova1337/VoidRecon.git@main"])
+
+
 def _cmd_wizard(args) -> int:
     print(_BANNER)
     print("VoidRecon guided setup — press Enter to accept the [default].\n")
@@ -786,6 +905,10 @@ def main(argv: list[str] | None = None) -> int:
             return 130
     if args.command == "wizard":
         return _cmd_wizard(args)
+    if args.command == "setup":
+        return _cmd_setup(args)
+    if args.command == "update":
+        return _cmd_update(args)
     if args.command == "modules":
         return _cmd_modules(args)
     if args.command == "diff":
