@@ -10,7 +10,7 @@
 
 ### Adversary-minded reconnaissance for authorized bug bounty & pentest engagements
 
-**49 modules · 7 phases · a built-in AI advisor · one scope-respecting engine**
+**49 modules · 7 phases · Built-in AI Advisor**
 
 *by [VoidSec-Hub](https://github.com/CypherNova1337)*
 
