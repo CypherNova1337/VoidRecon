@@ -1,6 +1,6 @@
 from voidrecon.core.config import Config
 from voidrecon.core.context import RunContext
-from voidrecon.core.models import Finding, Severity
+from voidrecon.core.models import Asset, AssetKind, Finding, Severity
 from voidrecon.core.scope import Scope
 from voidrecon.reporting.report import Reporter
 from voidrecon.utils.text import short_url
@@ -35,6 +35,44 @@ def test_report_deduplicates_where_to_test_and_refs(tmp_path):
     html = reporter.render_html()
     # exactly one anchor for that URL in the finding block
     assert html.count(f'href="{url}"') == 1
+
+
+def test_candidates_dedup_by_injection_point(tmp_path):
+    cfg = Config.load(overrides={"general": {"output_dir": str(tmp_path)}})
+    ctx = RunContext(cfg, Scope.from_lists(["hytale.com"]))
+    ctx.output_dir = tmp_path / "run"
+    # 50 copies of the same endpoint+param (only the id value differs) …
+    for i in range(1, 51):
+        ctx.store.add_asset(Asset(
+            AssetKind.URL, f"https://hytale.com/api/flows?id={i}",
+            attrs={"vuln_hints": ["idor", "sqli"]},
+        ))
+    # … one different parameter on the same path (a distinct injection point) …
+    ctx.store.add_asset(Asset(
+        AssetKind.URL, "https://hytale.com/api/flows?sort=name",
+        attrs={"vuln_hints": ["idor"]},
+    ))
+    # … and an empty-valued param that should defer to a filled representative.
+    ctx.store.add_asset(Asset(
+        AssetKind.URL, "https://hytale.com/api/users?id=",
+        attrs={"vuln_hints": ["idor"]},
+    ))
+    ctx.store.add_asset(Asset(
+        AssetKind.URL, "https://hytale.com/api/users?id=7",
+        attrs={"vuln_hints": ["idor"]},
+    ))
+    reporter = Reporter(ctx, {})
+    written = reporter._write_candidates(ctx.output_dir)
+    idor = written["idor"].read_text().splitlines()
+    # flows?id (one), flows?sort (one), users?id (one) = 3 injection points, not 52.
+    assert len(idor) == 3
+    assert any(line.startswith("https://hytale.com/api/flows?id=") for line in idor)
+    assert "https://hytale.com/api/flows?sort=name" in idor
+    # the filled value wins over the empty one for tool-readiness
+    assert "https://hytale.com/api/users?id=7" in idor
+    assert "https://hytale.com/api/users?id=" not in idor
+    # sqli only saw the flows?id point
+    assert written["sqli"].read_text().splitlines() == ["https://hytale.com/api/flows?id=1"]
 
 
 def test_report_short_title_in_findings(tmp_path):

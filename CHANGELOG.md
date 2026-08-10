@@ -7,7 +7,16 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
-## [0.3.1]
+## [0.3.2]
+
+### Fixed / improved (from the Hytale field run)
+- **Candidate lists are deduplicated by injection point, not by URL.** The same
+  endpoint with different values — `/flows?id=1`, `/flows?id=2` … `/flows?id=999`
+  — is one injection point (the `id` parameter on `/flows`) and now collapses to a
+  single line; a different parameter on the same path (`/flows?sort=name`) stays a
+  separate target. Each line keeps a non-empty parameter value so dalfox/sqlmap/
+  nuclei don't error on empty inputs. A 50-line `idor.txt` of one endpoint becomes
+  the handful of distinct tests you actually need to run.
 
 ### Fixed
 - **`voidrecon update` stale-cache bug:** the updater re-fetches the latest version

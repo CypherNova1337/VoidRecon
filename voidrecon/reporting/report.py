@@ -94,14 +94,64 @@ class Reporter:
     _CANDIDATE_TAGS = ("xss", "sqli", "ssrf", "lfi", "rce", "ssti", "crlf",
                        "open-redirect", "idor", "redirect", "debug", "prototype-pollution")
 
-    def _write_candidates(self, outdir: Path) -> dict[str, Path]:
-        from collections import defaultdict
+    @staticmethod
+    def _injection_key(url: str) -> tuple:
+        """Collapse a URL to its injection point: (scheme, host, path, param-names).
 
-        buckets: dict[str, set] = defaultdict(set)
+        A vulnerability class lives at an *injection point*, not at a specific
+        value. ``/flows?id=1``, ``/flows?id=2`` … ``/flows?id=999`` are the same
+        SQLi/XSS test target — the ``id`` parameter on ``/flows`` — so they map to
+        one key and become one line. A different parameter (``/flows?sort=name``)
+        is a distinct injection point and stays separate. This is exactly how
+        dalfox/sqlmap/nuclei treat them, so the candidate files pipe in clean.
+        """
+        from urllib.parse import parse_qsl, urlsplit
+
+        try:
+            p = urlsplit(url)
+        except Exception:
+            return ("", "", url, ())
+        names = tuple(sorted({k for k, _ in parse_qsl(p.query, keep_blank_values=True)}))
+        return (p.scheme, p.netloc, p.path, names)
+
+    @staticmethod
+    def _better_representative(current: str, candidate: str) -> str:
+        """Pick the more tool-ready of two URLs for the same injection point.
+
+        Prefer the one whose parameters carry non-empty values (tools error on
+        ``?id=`` with nothing to mutate), then the shorter/cleaner URL.
+        """
+        from urllib.parse import parse_qsl, urlsplit
+
+        def filled(u: str) -> int:
+            try:
+                q = urlsplit(u).query
+            except Exception:
+                return 0
+            return sum(1 for _, v in parse_qsl(q, keep_blank_values=True) if v)
+
+        if current is None:
+            return candidate
+        cf, nf = filled(current), filled(candidate)
+        if nf != cf:
+            return candidate if nf > cf else current
+        return candidate if len(candidate) < len(current) else current
+
+    def _write_candidates(self, outdir: Path) -> dict[str, Path]:
+        # One representative URL per (category, injection point). See _injection_key.
+        buckets: dict[str, dict[tuple, str]] = {}
+
+        def add(cat: str, url: str) -> None:
+            if not url:
+                return
+            point = buckets.setdefault(cat, {})
+            key = self._injection_key(url)
+            point[key] = self._better_representative(point.get(key), url)
+
         # Full lists from classified endpoints (each carries its matching params).
         for a in self.store.assets(AssetKind.URL) + self.store.assets(AssetKind.ENDPOINT):
             for cat in a.attrs.get("vuln_hints", []) or []:
-                buckets[cat].add(a.value)
+                add(cat, a.value)
         # Plus any confirmed/candidate finding that names a URL.
         for f in self.store.findings():
             url = (f.evidence or {}).get("url")
@@ -109,14 +159,16 @@ class Reporter:
                 continue
             for tag in f.tags:
                 if tag in self._CANDIDATE_TAGS:
-                    buckets[tag].add(url)
+                    add(tag, url)
+
         written: dict[str, Path] = {}
         if buckets:
             cdir = outdir / "candidates"
             cdir.mkdir(parents=True, exist_ok=True)
-            for cat, urls in buckets.items():
+            for cat, points in buckets.items():
+                urls = sorted(points.values())
                 p = cdir / f"{cat}.txt"
-                p.write_text("\n".join(sorted(urls)) + "\n", encoding="utf-8")
+                p.write_text("\n".join(urls) + "\n", encoding="utf-8")
                 written[cat] = p
         self._candidate_files = written
         return written

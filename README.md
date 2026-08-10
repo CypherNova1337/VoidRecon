@@ -114,7 +114,9 @@ export VOIDRECON_NOTIFY_TELEGRAM_TOKEN=123:abc VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID
 
 ## Output & review
 
-Each run folder (`runs/<target>-<timestamp>/`) contains the JSON/Markdown/HTML report **plus ready-to-use candidate lists** — one file per vulnerability class, so you can feed a whole class straight into the right tool:
+Each run folder (`runs/<target>-<timestamp>/`) contains the JSON/Markdown/HTML report **plus ready-to-use candidate lists** — one file per vulnerability class, so you can feed a whole class straight into the right tool.
+
+The lists are **deduplicated by injection point**, not by URL. A vulnerability lives at a parameter on a path, not at a specific value — so `/flows?id=1`, `/flows?id=2` … `/flows?id=999` collapse to **one** target (the `id` parameter on `/flows`), while `/flows?sort=name` stays separate because it's a different parameter. Each line keeps a real, non-empty value so dalfox/sqlmap/nuclei don't choke. That turns a 50-line dump of the same endpoint into the handful of distinct tests you actually need to run:
 
 ```
 runs/<target>-<timestamp>/
