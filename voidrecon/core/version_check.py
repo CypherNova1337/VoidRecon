@@ -21,7 +21,7 @@ from voidrecon.version import __version__
 _REPO = "CypherNova1337/VoidRecon"
 # Branch that carries the current code / releases. Override with VOIDRECON_UPDATE_BRANCH
 # (set this to "main" once the code is merged there).
-DEFAULT_BRANCH = "voidsec-hub/bug-bounty-recon-kzbnsc"
+DEFAULT_BRANCH = "main"
 
 
 def update_branch() -> str:
