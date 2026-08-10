@@ -56,48 +56,62 @@ class GithubDork(Module):
             await self._search_seed(ctx, seed, headers)
 
     async def _search_seed(self, ctx: RunContext, apex: str, headers: dict) -> None:
-        repos: set[str] = set()
-        flagged = 0
+        # repo -> {"hits": {url,...}, "dorks": {dork,...}, "owned": bool}
+        repos: dict[str, dict] = {}
+        apex_label = apex.split(".")[0].lower()
         for dork in _DORKS:
             q = f'"{apex}" {dork}'.strip()
             data = await ctx.http.get_json(
-                "https://api.github.com/search/code",
-                headers=headers,
+                "https://api.github.com/search/code", headers=headers,
                 params={"q": q, "per_page": 30},
             )
-            if not data or "items" not in data:
-                continue
-            for item in data["items"]:
-                repo = (item.get("repository") or {})
-                full = repo.get("full_name")
-                html_url = item.get("html_url")
-                if full:
-                    repos.add(full)
-                # A hit on a secret-flavoured dork is worth a lead.
-                if dork and dork not in ("password",) and html_url:
-                    flagged += 1
-                    ctx.add_finding(
-                        f"GitHub code mentions {apex} near '{dork}'",
-                        module=self.name,
-                        severity=Severity.MEDIUM,
-                        confidence=Confidence.TENTATIVE,
-                        asset=apex,
-                        description=(
-                            "A public file references the target alongside a sensitive "
-                            "keyword. Manually review for real credentials or internal "
-                            "endpoints — search hits are not confirmed leaks."
-                        ),
-                        evidence={"query": q, "url": html_url, "repo": full},
-                        references=[html_url],
-                        tags={"github", "leak-candidate"},
-                    )
-            # Respect GitHub search secondary rate limits.
-            await asyncio.sleep(2.0)
+            if isinstance(data, dict) and data.get("items"):
+                for item in data["items"]:
+                    repo = item.get("repository") or {}
+                    full = repo.get("full_name")
+                    if not full or self._is_noise(full, repo):
+                        continue
+                    rec = repos.setdefault(full, {"hits": set(), "dorks": set(), "owner": full.split("/")[0].lower()})
+                    if item.get("html_url"):
+                        rec["hits"].add(item["html_url"])
+                    if dork:
+                        rec["dorks"].add(dork)
+            await asyncio.sleep(2.0)  # respect search secondary rate limits
 
-        for repo in repos:
-            ctx.add_asset(
-                AssetKind.CODE_REPO, f"github.com/{repo}", source=self.name,
-                confidence=Confidence.TENTATIVE, repo=repo,
+        secret_repos = 0
+        for full, rec in repos.items():
+            ctx.add_asset(AssetKind.CODE_REPO, f"github.com/{full}", source=self.name,
+                          confidence=Confidence.TENTATIVE, repo=full)
+            # Screen: only flag repos that hit a *secret-flavoured* dork, and rank
+            # repos owned by (or named after) the target higher.
+            secret_dorks = {d for d in rec["dorks"] if d and d != "password"}
+            if not secret_dorks:
+                continue
+            owned = apex_label in rec["owner"] or apex_label in full.split("/")[-1].lower()
+            secret_repos += 1
+            ctx.add_finding(
+                f"GitHub: {full} references {apex} near secrets ({', '.join(sorted(secret_dorks)[:3])})",
+                module=self.name,
+                severity=Severity.MEDIUM if owned else Severity.LOW,
+                confidence=Confidence.TENTATIVE, asset=apex,
+                description=("A public repo references the target alongside sensitive keywords"
+                             + (" and appears to belong to the target org" if owned else "")
+                             + ". Review the matched files for real credentials/endpoints — "
+                             "search hits are leads, not confirmed leaks."),
+                evidence={"repo": full, "dorks": sorted(secret_dorks), "urls": sorted(rec["hits"])[:8],
+                          "url": next(iter(sorted(rec["hits"])), None)},
+                references=sorted(rec["hits"])[:5], tags={"github", "leak-candidate"},
             )
         if repos:
-            self.log.info("github: %d repos mention %s (%d secret-flavoured hits)", len(repos), apex, flagged)
+            self.log.info("github: %d repo(s) mention %s (%d flagged after screening)",
+                          len(repos), apex, secret_repos)
+
+    @staticmethod
+    def _is_noise(full: str, repo: dict) -> bool:
+        if repo.get("fork"):
+            return True
+        low = full.lower()
+        noise = ("seclist", "wordlist", "payload", "dork", "bugbounty-targets", "awesome-",
+                 "public-suffix", "top1million", "top-1m", "crt.sh", "domains-", "-domains",
+                 "certstream", "commoncrawl", "phishing", "blocklist", "blacklist", "hosts")
+        return any(n in low for n in noise)

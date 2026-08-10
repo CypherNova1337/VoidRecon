@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+### Fixed / improved (from live use)
+- **Live display no longer freezes:** the progress table auto-refreshes, so the
+  elapsed timer keeps moving during long modules (e.g. dns_brute).
+- **Actionable findings:** each finding now lists "Where to test" (the exact
+  URLs/params), and per-category **candidate files** are written to
+  `runs/<run>/candidates/<class>.txt` (xss, lfi, sqli, …) for feeding other tools.
+- **Clickable report:** HTML stat cards expand to the full asset list per kind;
+  finding evidence renders as clickable links.
+- **Better GitHub dorking:** skips forks and wordlist/dork/noise repos, dedupes
+  per repo, aggregates hits, and ranks target-owned repos higher.
+- **Clickable dork page:** `dork_report` writes `dorks-<apex>.html` with
+  ready-to-click Google/GitHub/infra queries.
+- **Deeper AI read:** the Advisor's analyst summary is now multi-part (surface,
+  severity breakdown, named urgent findings, prioritised hosts, attack paths).
+
 ### Added (setup, Telegram, keyless AI, version check)
 - **`voidrecon setup`:** interactive configuration of API keys and notifications,
   saved to `~/.config/voidrecon/config.yaml` (now auto-loaded on every run).
