@@ -44,10 +44,16 @@ class LiveMonitor:
         self._phase_label = ""
 
     # ---- lifecycle --------------------------------------------------------
+    def __rich__(self):
+        # Recomputed on every auto-refresh tick, so running timers keep moving
+        # even while a long module (e.g. dns_brute) produces no events.
+        return self._render()
+
     def __enter__(self):
         if self.enabled:
-            self._live = Live(self._render(), console=self.console,
-                              refresh_per_second=8, transient=False)
+            # Pass self (not a static renderable) + auto-refresh so elapsed updates live.
+            self._live = Live(self, console=self.console, refresh_per_second=4,
+                              transient=False, auto_refresh=True)
             self._live.start()
         return self
 
@@ -93,8 +99,12 @@ class LiveMonitor:
 
     # ---- rendering --------------------------------------------------------
     def _refresh(self) -> None:
+        # State lives on self; auto-refresh re-renders via __rich__. Nudge for immediacy.
         if self._live is not None:
-            self._live.update(self._render())
+            try:
+                self._live.refresh()
+            except Exception:
+                pass
 
     def _header(self):
         elapsed = time.time() - self._started

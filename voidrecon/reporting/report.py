@@ -37,12 +37,16 @@ class Reporter:
         self.summary = summary or {}
         self.store = ctx.store
         self.generated = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        self._candidate_files: dict[str, Path] = {}
 
     # ---- public API -------------------------------------------------------
     def write_all(self, formats: list[str] | None = None) -> dict[str, Path]:
         formats = formats or ["json", "markdown", "html"]
         outdir = self.ctx.output_dir
         outdir.mkdir(parents=True, exist_ok=True)
+        # Per-category candidate lists (xss.txt, lfi.txt, …) — computed first so
+        # the reports can reference them.
+        self._write_candidates(outdir)
         written: dict[str, Path] = {}
         if "json" in formats:
             written["json"] = self._write_json(outdir / "voidrecon.json")
@@ -85,6 +89,57 @@ class Reporter:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
+
+    # ---- candidate lists (where to actually test) -------------------------
+    _CANDIDATE_TAGS = ("xss", "sqli", "ssrf", "lfi", "rce", "ssti", "crlf",
+                       "open-redirect", "idor", "redirect", "debug", "prototype-pollution")
+
+    def _write_candidates(self, outdir: Path) -> dict[str, Path]:
+        from collections import defaultdict
+
+        buckets: dict[str, set] = defaultdict(set)
+        # Full lists from classified endpoints (each carries its matching params).
+        for a in self.store.assets(AssetKind.URL) + self.store.assets(AssetKind.ENDPOINT):
+            for cat in a.attrs.get("vuln_hints", []) or []:
+                buckets[cat].add(a.value)
+        # Plus any confirmed/candidate finding that names a URL.
+        for f in self.store.findings():
+            url = (f.evidence or {}).get("url")
+            if not url:
+                continue
+            for tag in f.tags:
+                if tag in self._CANDIDATE_TAGS:
+                    buckets[tag].add(url)
+        written: dict[str, Path] = {}
+        if buckets:
+            cdir = outdir / "candidates"
+            cdir.mkdir(parents=True, exist_ok=True)
+            for cat, urls in buckets.items():
+                p = cdir / f"{cat}.txt"
+                p.write_text("\n".join(sorted(urls)) + "\n", encoding="utf-8")
+                written[cat] = p
+        self._candidate_files = written
+        return written
+
+    @staticmethod
+    def _evidence_urls(finding) -> list[str]:
+        ev = finding.evidence or {}
+        urls: list[str] = []
+        if ev.get("url"):
+            urls.append(str(ev["url"]))
+        for key in ("urls", "sample_keys", "matched"):
+            v = ev.get(key)
+            if isinstance(v, list):
+                urls.extend(str(x) for x in v)
+            elif isinstance(v, str):
+                urls.append(v)
+        # de-dup preserve order
+        seen, out = set(), []
+        for u in urls:
+            if u not in seen:
+                seen.add(u)
+                out.append(u)
+        return out[:8]
 
     # ---- Markdown ---------------------------------------------------------
     def render_markdown(self) -> str:
@@ -150,9 +205,21 @@ class Reporter:
                 lines.append(f"- **Module:** {f.module} · **Confidence:** {f.confidence.value}")
                 if f.description:
                     lines.append(f"- {f.description}")
+                ev_urls = self._evidence_urls(f)
+                if ev_urls:
+                    lines.append("- **Where to test:**")
+                    for u in ev_urls:
+                        lines.append(f"    - `{u}`")
                 if f.references:
                     lines.append(f"- Refs: {', '.join(f.references)}")
                 lines.append("")
+
+        if self._candidate_files:
+            lines.append("## Candidate lists (ready to feed your tools)")
+            for cat, path in sorted(self._candidate_files.items()):
+                n = sum(1 for _ in path.open())
+                lines.append(f"- **{cat.upper()}** — {n} endpoint(s): `candidates/{path.name}`")
+            lines.append("")
 
         lines.append("## Prioritised targets")
         top = top_assets(self.store, limit=40, kinds={AssetKind.SUBDOMAIN, AssetKind.DOMAIN})
@@ -187,26 +254,55 @@ class Reporter:
         def esc(x) -> str:
             return html.escape(str(x if x is not None else ""))
 
-        cards = "".join(
-            f'<div class="card"><div class="n">{counts.get(k,0)}</div><div class="l">{k}</div></div>'
-            for k in ("domain", "subdomain", "ip", "cidr", "asn", "service", "url", "endpoint")
-            if counts.get(k)
-        )
-        cards += f'<div class="card"><div class="n">{counts.get("findings",0)}</div><div class="l">findings</div></div>'
+        # Clickable stat cards: each expands to the list of assets of that kind.
+        cards = ""
+        for k in ("domain", "subdomain", "ip", "cidr", "asn", "service", "url", "endpoint",
+                  "email", "cloud_resource"):
+            c = counts.get(k, 0)
+            if not c:
+                continue
+            try:
+                vals = sorted(a.value for a in self.store.assets(AssetKind(k)))
+            except Exception:
+                vals = []
+            items = "".join(f"<li>{esc(v)}</li>" for v in vals[:2000])
+            cards += (f'<details class="card"><summary><span class="n">{c}</span>'
+                      f'<span class="l">{esc(k)}</span></summary>'
+                      f'<ul class="asset-list">{items}</ul></details>')
+        cards += (f'<a class="card static" href="#findings"><span class="n">'
+                  f'{counts.get("findings",0)}</span><span class="l">findings</span></a>')
+
+        def _link(u):
+            u = esc(u)
+            href = u if u.lower().startswith(("http://", "https://")) else ""
+            return f'<a href="{href}" target="_blank" rel="noreferrer">{u}</a>' if href else f"<code>{u}</code>"
 
         findings_html = ""
         for f in findings:
             color = _SEV_COLOR.get(f.severity.value, "#546e7a")
-            refs = "".join(f'<a href="{esc(r)}">{esc(r)}</a> ' for r in f.references)
+            refs = "".join(f'<a href="{esc(r)}" target="_blank">{esc(r)}</a> ' for r in f.references)
+            ev_urls = self._evidence_urls(f)
+            where = ("<div class='where'><b>Where to test:</b><ul>"
+                     + "".join(f"<li>{_link(u)}</li>" for u in ev_urls) + "</ul></div>") if ev_urls else ""
             findings_html += (
-                f'<div class="finding"><span class="badge" style="background:{color}">'
-                f'{esc(f.severity.value.upper())}</span> <strong>{esc(f.title)}</strong>'
+                f'<div class="finding" style="border-left-color:{color}">'
+                f'<span class="badge" style="background:{color}">{esc(f.severity.value.upper())}</span> '
+                f'<strong>{esc(f.title)}</strong>'
                 f'<div class="meta">{esc(f.module)} · {esc(f.confidence.value)}'
                 + (f' · <code>{esc(f.asset)}</code>' if f.asset else "")
-                + f'</div><p>{esc(f.description)}</p>{("<p class=refs>"+refs+"</p>") if refs else ""}</div>'
+                + f'</div><p>{esc(f.description)}</p>{where}'
+                + (f'<p class="refs">{refs}</p>' if refs else "") + "</div>"
             )
         if not findings_html:
             findings_html = "<p><em>No findings recorded.</em></p>"
+
+        cand_html = ""
+        if self._candidate_files:
+            rows_c = "".join(
+                f"<li><b>{esc(cat.upper())}</b> — {sum(1 for _ in p.open())} endpoints "
+                f"→ <code>candidates/{esc(p.name)}</code></li>"
+                for cat, p in sorted(self._candidate_files.items()))
+            cand_html = f'<section><h2>Candidate lists</h2><ul class="cand">{rows_c}</ul></section>'
 
         rows = ""
         for a in top:
@@ -273,9 +369,18 @@ class Reporter:
   section {{ margin-bottom:32px; }}
   h2 {{ font-size:18px; border-bottom:1px solid var(--border); padding-bottom:6px; }}
   .cards {{ display:flex; flex-wrap:wrap; gap:12px; }}
-  .card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 18px; min-width:96px; text-align:center; }}
-  .card .n {{ font-size:26px; font-weight:700; color:var(--accent); }}
+  .card {{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 18px; min-width:110px; text-align:center; cursor:pointer; }}
+  .card.static {{ text-decoration:none; display:block; }}
+  .card summary {{ list-style:none; }}
+  .card summary::-webkit-details-marker {{ display:none; }}
+  .card .n {{ font-size:26px; font-weight:700; color:var(--accent); display:block; }}
   .card .l {{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }}
+  details.card[open] {{ text-align:left; min-width:280px; }}
+  .asset-list {{ list-style:none; margin:10px 0 0; padding:0; max-height:320px; overflow:auto; font-size:12px; }}
+  .asset-list li {{ padding:2px 0; border-bottom:1px solid var(--border); word-break:break-all; font-family:monospace; }}
+  .where {{ margin-top:8px; font-size:13px; }} .where ul {{ margin:4px 0 0; padding-left:18px; }}
+  .where a {{ color:var(--accent); word-break:break-all; }}
+  .cand li {{ margin:3px 0; }}
   .finding {{ background:var(--panel); border:1px solid var(--border); border-left:4px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:12px; }}
   .finding p {{ margin:8px 0 0; color:#c9d1d9; }}
   .badge {{ color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; }}
@@ -304,7 +409,8 @@ class Reporter:
   {summary_html}
   {advice_html}
   {llm_html}
-  <section><h2>Findings</h2>{findings_html}</section>
+  <section id="findings"><h2>Findings</h2>{findings_html}</section>
+  {cand_html}
   {gallery_html}
   <section><h2>Prioritised targets</h2>
     <table><thead><tr><th>Score</th><th>Host</th><th>Scope</th><th>Status</th><th>Title</th><th>Signals</th></tr></thead>

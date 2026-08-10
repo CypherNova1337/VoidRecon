@@ -75,35 +75,48 @@ def _sev_counts(store) -> dict:
 
 
 def summarize(ctx) -> str:
-    """A generated, key-free natural-language read of the engagement."""
+    """A generated, key-free natural-language read of the engagement (multi-paragraph)."""
     store = ctx.store
     c = store.counts()
     sev = _sev_counts(store)
+    findings = store.findings()
     target = ", ".join(ctx.scope.seeds) or "the target"
-    parts = [f"VoidRecon mapped {target}: "]
-    surface = []
-    for k, label in (("subdomain", "subdomains"), ("ip", "IPs"), ("service", "services"),
-                     ("url", "live URLs"), ("endpoint", "endpoints")):
-        if c.get(k):
-            surface.append(f"{c[k]} {label}")
-    parts.append(", ".join(surface) if surface else "no surface resolved")
-    parts.append(". ")
+    lines: list[str] = []
 
-    high = sev.get("critical", 0) + sev.get("high", 0)
-    if high:
-        parts.append(f"{high} high-severity finding(s) stand out"
-                     f"{' — ' if sev else ''}")
-    top = top_assets(store, limit=3, kinds={AssetKind.SUBDOMAIN, AssetKind.DOMAIN})
+    # 1) Surface.
+    surface = [f"{c[k]} {label}" for k, label in
+               (("subdomain", "subdomains"), ("ip", "IPs"), ("service", "open services"),
+                ("url", "live web assets"), ("endpoint", "endpoints"), ("cloud_resource", "cloud resources"))
+               if c.get(k)]
+    live = sum(1 for a in store.assets(AssetKind.SUBDOMAIN) if a.attrs.get("resolved_ips"))
+    lines.append(f"Across {target}, VoidRecon mapped " + (", ".join(surface) if surface else "no surface")
+                 + (f" ({live} hosts resolve live)" if live else "") + ".")
+
+    # 2) Risk posture with named high findings.
+    if sev:
+        breakdown = ", ".join(f"{sev[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if sev.get(s))
+        lines.append(f"Findings: {breakdown}.")
+    highs = [f for f in findings if f.severity.rank >= 3]
+    if highs:
+        named = "; ".join(f"{f.title}" for f in sorted(highs, key=lambda f: -f.severity.rank)[:5])
+        lines.append(f"Most urgent: {named}.")
+
+    # 3) Where to look first.
+    top = top_assets(store, limit=5, kinds={AssetKind.SUBDOMAIN, AssetKind.DOMAIN})
     if top:
-        parts.append("Highest-priority hosts: " + ", ".join(f"{a.value}" for a in top) + ". ")
+        lines.append("Highest-priority hosts to review: "
+                     + ", ".join(f"{a.value} ({a.score:.0f})" for a in top) + ".")
 
-    tags = {t for f in store.findings() for t in f.tags}
+    # 4) Attack paths from co-occurring signals.
+    tags = {t for f in findings for t in f.tags}
     plays = [msg for needed, msg in _CHAINS if needed <= tags]
     if plays:
-        parts.append("Likely attack paths: " + " ".join(f"({i+1}) {p}" for i, p in enumerate(plays[:4])))
-    elif not high:
-        parts.append("No high-severity findings yet — prioritise the highest-scoring hosts for manual review.")
-    return "".join(parts).strip()
+        lines.append("Likely attack paths — " + " ".join(f"({i+1}) {p}" for i, p in enumerate(plays[:5])))
+    elif not highs:
+        lines.append("No high-severity findings yet; work down the prioritised hosts and enable the "
+                     "opt-in active modules (fuzzing, param discovery, injection probes) on the juiciest.")
+
+    return " ".join(lines).strip()
 
 
 def recommend(ctx, limit: int = 12) -> list[dict]:
