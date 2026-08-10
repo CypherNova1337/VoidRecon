@@ -7,6 +7,8 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.3.0] — Wraith
+
 ### Fixed / improved (from the Hytale field run)
 - **No more double links:** references that duplicate the "Where to test" URLs are
   no longer rendered twice.

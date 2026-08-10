@@ -47,7 +47,7 @@ class RunContext:
             httpc = self.config.section("http")
             auth = self.config.section("auth")
             self._http = HttpClient(
-                user_agent=self.config.get("general.user_agent", "VoidRecon/0.2"),
+                user_agent=self.config.get("general.user_agent", "VoidRecon/0.3"),
                 rate=float(opsec.get("requests_per_second", 8.0)),
                 jitter=float(opsec.get("jitter", 0.0)),
                 concurrency=int(opsec.get("max_concurrency", 20)),

@@ -22,7 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "general": {
         "output_dir": "runs",
         "log_level": "info",
-        "user_agent": "VoidRecon/0.2 (+https://github.com/CypherNova1337/VoidRecon)",
+        "user_agent": "VoidRecon/0.3 (+https://github.com/CypherNova1337/VoidRecon)",
         "wildcard_apex": True,   # a bare apex in scope covers subdomains
         "sqlite": True,          # append each run to <output_base>/voidrecon.db
     },

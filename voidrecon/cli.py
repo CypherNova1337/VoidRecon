@@ -813,19 +813,21 @@ def _cmd_update(args) -> int:
 
     from voidrecon.core import version_check
 
+    from voidrecon.core.version_check import update_branch
+    from voidrecon.utils.versions import is_newer
+
     latest = version_check.fetch_latest(timeout=6.0)
     if latest is None:
         print("could not determine the latest version (offline?).", file=sys.stderr)
-    else:
-        from voidrecon.utils.versions import is_newer
-        if not is_newer(latest, __version__):
-            print(f"VoidRecon is up to date (running {__version__}).")
-            return 0
+    elif is_newer(latest, __version__):
         print(f"Update available: {latest} (running {__version__}).")
+    else:
+        print(f"Version {__version__} is current (latest published: {latest}).")
+
+    # --check only reports; a bare 'update' always pulls the latest code, so it
+    # works even when the version string hasn't changed between commits.
     if getattr(args, "check", False):
         return 0
-
-    from voidrecon.core.version_check import update_branch
 
     branch = update_branch()
     # Prefer 'git pull' inside a checkout, else pip upgrade from GitHub.
