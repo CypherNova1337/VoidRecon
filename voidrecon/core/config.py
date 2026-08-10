@@ -94,8 +94,10 @@ DEFAULTS: dict[str, Any] = {
         "formats": ["json", "markdown", "html"],
     },
     "notify": {
-        # Optional completion notification to a Slack or Discord webhook.
-        "webhook": None,            # prefer env: VOIDRECON_NOTIFY_WEBHOOK
+        # Optional completion notifications. Any/all channels may be set.
+        "webhook": None,            # Slack or Discord webhook (env: VOIDRECON_NOTIFY_WEBHOOK)
+        "telegram_token": None,     # Telegram bot token (env: VOIDRECON_NOTIFY_TELEGRAM_TOKEN)
+        "telegram_chat_id": None,   # Telegram chat id  (env: VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID)
         "min_severity": "high",     # only ping if a finding at/above this severity exists
     },
 }
@@ -165,6 +167,14 @@ class Config:
                 cfg = _deep_merge(cfg, _load_yaml(packaged))
             except Exception:
                 pass
+        # Persistent user config (written by `voidrecon setup`).
+        try:
+            user_cfg = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+            user_cfg = user_cfg / "voidrecon" / "config.yaml"
+            if user_cfg.exists():
+                cfg = _deep_merge(cfg, _load_yaml(user_cfg))
+        except Exception:
+            pass
         if config_path:
             p = Path(config_path)
             if not p.exists():

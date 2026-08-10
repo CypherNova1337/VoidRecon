@@ -54,6 +54,58 @@ _RULES = [
 ]
 
 
+# Attack-path chains: when these tag-sets co-occur, suggest the combined play.
+_CHAINS = [
+    ({"secret"}, "Leaked secrets → authenticate to the exposed service/API and pivot."),
+    ({"user-enum", "auth-gate"}, "Enumerated users + a login gate → targeted password / default-cred attack."),
+    ({"exposure", "auth-gate"}, "Exposed config/backup + a login gate → recover credentials, then log in."),
+    ({"introspection"}, "GraphQL schema exposed → walk mutations for unauthenticated privileged actions."),
+    ({"waf-bypass"}, "Reachable origin → replay attacks straight at the origin, skipping the WAF/CDN."),
+    ({"takeover"}, "Claimable subdomain → host content on a trusted origin (cookie theft, phishing, CSP bypass)."),
+    ({"sqli"}, "SQLi candidate → confirm with sqlmap in-scope, then assess data exposure."),
+    ({"ssti"}, "SSTI candidate → build the engine-specific payload toward RCE."),
+]
+
+
+def _sev_counts(store) -> dict:
+    out: dict[str, int] = {}
+    for f in store.findings():
+        out[f.severity.value] = out.get(f.severity.value, 0) + 1
+    return out
+
+
+def summarize(ctx) -> str:
+    """A generated, key-free natural-language read of the engagement."""
+    store = ctx.store
+    c = store.counts()
+    sev = _sev_counts(store)
+    target = ", ".join(ctx.scope.seeds) or "the target"
+    parts = [f"VoidRecon mapped {target}: "]
+    surface = []
+    for k, label in (("subdomain", "subdomains"), ("ip", "IPs"), ("service", "services"),
+                     ("url", "live URLs"), ("endpoint", "endpoints")):
+        if c.get(k):
+            surface.append(f"{c[k]} {label}")
+    parts.append(", ".join(surface) if surface else "no surface resolved")
+    parts.append(". ")
+
+    high = sev.get("critical", 0) + sev.get("high", 0)
+    if high:
+        parts.append(f"{high} high-severity finding(s) stand out"
+                     f"{' — ' if sev else ''}")
+    top = top_assets(store, limit=3, kinds={AssetKind.SUBDOMAIN, AssetKind.DOMAIN})
+    if top:
+        parts.append("Highest-priority hosts: " + ", ".join(f"{a.value}" for a in top) + ". ")
+
+    tags = {t for f in store.findings() for t in f.tags}
+    plays = [msg for needed, msg in _CHAINS if needed <= tags]
+    if plays:
+        parts.append("Likely attack paths: " + " ".join(f"({i+1}) {p}" for i, p in enumerate(plays[:4])))
+    elif not high:
+        parts.append("No high-severity findings yet — prioritise the highest-scoring hosts for manual review.")
+    return "".join(parts).strip()
+
+
 def recommend(ctx, limit: int = 12) -> list[dict]:
     store = ctx.store
     findings = store.findings()

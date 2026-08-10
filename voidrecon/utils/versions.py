@@ -36,6 +36,14 @@ def _cmp(a: tuple[list[int], str], b: tuple[list[int], str]) -> int:
     return -1 if asuf < bsuf else 1
 
 
+def is_newer(candidate: str, current: str) -> bool:
+    """True if ``candidate`` is a strictly newer version than ``current``."""
+    a, b = parse_version(candidate), parse_version(current)
+    if a is None or b is None:
+        return False
+    return _cmp(a, b) > 0
+
+
 def in_range(version: str, minimum: str | None, maximum: str | None) -> bool:
     """Inclusive range check. Either bound may be omitted (open-ended)."""
     v = parse_version(version)

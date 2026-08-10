@@ -35,9 +35,10 @@ class Intelligence(Module):
         if top:
             self.log.info("top target: %s (score %.0f)", top[0].value, top[0].score)
 
-        # Advisor: heuristic, always-on "what to do next" plan.
+        # Advisor: heuristic, always-on "what to do next" plan + narrative summary.
         advice = advisor.recommend(ctx)
         setattr(ctx.store, "advice", advice)
+        setattr(ctx.store, "advice_summary", advisor.summarize(ctx))
         if advice:
             self.log.info("advisor: %d recommended next step(s); top: %s",
                           len(advice), advice[0]["action"])
