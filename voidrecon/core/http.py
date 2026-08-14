@@ -9,12 +9,49 @@ from __future__ import annotations
 
 import asyncio
 import random
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from voidrecon.core.logging import get_logger
 from voidrecon.core.ratelimit import ConcurrencyGuard, RateLimiter
+
+
+@dataclass
+class Outcome:
+    """The classified result of a passive-source fetch.
+
+    The point is to never again confuse "there is genuinely nothing" with "the
+    source rate-limited / blocked / timed out." ``status`` carries that verdict;
+    ``json``/``text`` carry the payload when ``ok``.
+    """
+
+    status: str                 # ok | empty | rate_limited | forbidden | not_found
+                                # | server_error | http_error | unreachable
+    http_status: int | None = None
+    json: Any = None
+    text: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+    @property
+    def failed(self) -> bool:
+        # A real failure to reach/read the source — distinct from an empty result.
+        return self.status in ("rate_limited", "forbidden", "server_error",
+                               "http_error", "unreachable")
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds to wait from a Retry-After header (delta-seconds form only)."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value.strip()))
+    except ValueError:
+        return None
 
 _UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -110,6 +147,54 @@ class HttpClient:
         if resp is None or resp.status_code >= 400:
             return None
         return resp.text
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        want: str = "json",       # "json" | "text"
+        retry_on_429: int = 2,
+        **kwargs: Any,
+    ) -> Outcome:
+        """Fetch and *classify* the result so callers know why a source is empty.
+
+        Rate limits (HTTP 429) are honoured: we wait out ``Retry-After`` (or an
+        exponential backoff) and retry a bounded number of times before giving up
+        — so a throttled source recovers within the run instead of silently
+        contributing nothing.
+        """
+        backoff = 2.0
+        for attempt in range(retry_on_429 + 1):
+            resp = await self.request(method, url, **kwargs)
+            if resp is None:
+                return Outcome("unreachable")
+            code = resp.status_code
+            if code == 429:
+                if attempt < retry_on_429:
+                    delay = _parse_retry_after(resp.headers.get("Retry-After")) or backoff
+                    await asyncio.sleep(min(delay, 30.0))
+                    backoff *= 2
+                    continue
+                return Outcome("rate_limited", code)
+            if code in (401, 403):
+                return Outcome("forbidden", code)
+            if code == 404:
+                return Outcome("not_found", code)
+            if code >= 500:
+                return Outcome("server_error", code)
+            if code >= 400:
+                return Outcome("http_error", code)
+            if want == "text":
+                text = resp.text
+                return Outcome("empty" if not text.strip() else "ok", code, text=text)
+            try:
+                data = resp.json()
+            except Exception:
+                return Outcome("http_error", code)
+            empty = data is None or (hasattr(data, "__len__") and len(data) == 0)
+            return Outcome("empty" if empty else "ok", code, json=data)
+        return Outcome("rate_limited")
 
     async def aclose(self) -> None:
         await self._client.aclose()

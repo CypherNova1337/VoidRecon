@@ -37,7 +37,9 @@ class Wayback(Module):
             self.log.info("archives: %d unique URLs for %s", len(urls), seed)
 
     async def _cdx(self, ctx: RunContext, apex: str) -> set[str]:
-        text = await ctx.http.get_text(
+        # The archive CDX index is large and slow — give it room, and record
+        # whether we actually reached it so an empty result is explainable.
+        o = await ctx.http.fetch(
             "https://web.archive.org/cdx/search/cdx",
             params={
                 "url": f"*.{apex}/*",
@@ -46,10 +48,11 @@ class Wayback(Module):
                 "collapse": "urlkey",
                 "limit": "50000",
             },
+            want="text", timeout=60.0,
         )
-        if not text:
-            return set()
-        return {line.strip() for line in text.splitlines() if line.strip()}
+        urls = {line.strip() for line in (o.text or "").splitlines() if line.strip()}
+        ctx.note_source("wayback", apex, o, len(urls))
+        return urls
 
     async def _tool(self, ctx: RunContext, apex: str) -> set[str]:
         tool = ctx.tools.first_available("gau", "waybackurls")

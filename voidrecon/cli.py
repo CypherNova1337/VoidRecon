@@ -544,6 +544,10 @@ async def _run(args) -> int:
     for fmt, path in written.items():
         log.info("report (%s): %s", fmt, path)
 
+    # Recon coverage — surface silently-failed sources so a zero is explained.
+    if not args.quiet:
+        _print_recon_coverage(reporter)
+
     # Advisor — the built-in analyst read + "what to do next" plan.
     advice = getattr(ctx.store, "advice", []) or []
     summary_txt = getattr(ctx.store, "advice_summary", "")
@@ -929,6 +933,32 @@ def _cmd_wizard(args) -> int:
         no_live=False, no_banner=True, yes=True,
     )
     return asyncio.run(_run(run_args))
+
+
+def _print_recon_coverage(reporter) -> None:
+    """One-line-per-source recon health so a zero result is never a mystery."""
+    try:
+        health = reporter._source_health()
+    except Exception:
+        health = []
+    if not health:
+        return
+    bad = {"rate_limited", "forbidden", "unreachable", "server_error", "http_error"}
+    label = reporter._HEALTH_LABEL
+    problems = [h for h in health if h["status"] in bad]
+    print("\n\033[1mRecon coverage:\033[0m")
+    for h in health:
+        st = h["status"]
+        mark = "\033[32m✓\033[0m" if st == "ok" else (
+            "\033[31m✗\033[0m" if st in bad else "\033[33m•\033[0m")
+        cnt = f" ({h['count']})" if h["count"] else ""
+        print(f"  {mark} {h['source']:<16} {label.get(st, st)}{cnt}")
+    if problems:
+        names = ", ".join(h["source"] for h in problems)
+        print(f"\n  \033[33m⚠ {len(problems)} source(s) failed (rate-limited/blocked/timed out): "
+              f"{names}.\033[0m")
+        print("    An empty section may be a failed source, not an empty target — "
+              "add API keys (voidrecon setup) or re-run to fill gaps.")
 
 
 def _cmd_serve(args) -> int:

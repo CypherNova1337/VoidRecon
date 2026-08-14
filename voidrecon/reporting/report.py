@@ -173,6 +173,47 @@ class Reporter:
         self._candidate_files = written
         return written
 
+    # ---- recon coverage (why a source is empty) ---------------------------
+    _HEALTH_LABEL = {
+        "ok": "ok", "empty": "nothing found", "no_key": "needs API key",
+        "rate_limited": "RATE-LIMITED", "forbidden": "BLOCKED (403/401)",
+        "not_found": "nothing found", "server_error": "source error (5xx)",
+        "http_error": "source error", "unreachable": "TIMED OUT / unreachable",
+    }
+    # Worst-first so the representative status of a source surfaces real trouble.
+    _HEALTH_RANK = ["rate_limited", "forbidden", "unreachable", "server_error",
+                    "http_error", "no_key", "empty", "not_found", "ok"]
+
+    def _source_health(self) -> list[dict]:
+        """Aggregate per-seed source rows into one row per source.
+
+        A source that returned data anywhere is ``ok`` (with the summed count);
+        otherwise its worst status wins, so 'rate-limited' or 'timed out' is what
+        the reader sees instead of a bare, unexplained zero."""
+        rows = []
+        getter = getattr(self.store, "source_health", None)
+        if callable(getter):
+            rows = getter() or []
+        if not rows:
+            return []
+        agg: dict[str, dict] = {}
+        for r in rows:
+            src = r.get("source", "?")
+            cur = agg.setdefault(src, {"source": src, "count": 0, "statuses": set()})
+            cur["count"] += int(r.get("count", 0) or 0)
+            cur["statuses"].add(r.get("status", "ok"))
+        out = []
+        for src, cur in agg.items():
+            if cur["count"] > 0:
+                status = "ok"
+            else:
+                status = next((s for s in self._HEALTH_RANK if s in cur["statuses"]), "empty")
+            out.append({"source": src, "count": cur["count"], "status": status})
+        # data-bearing sources first (by count), then problems, then the rest
+        out.sort(key=lambda d: (-d["count"], self._HEALTH_RANK.index(d["status"])
+                                if d["status"] in self._HEALTH_RANK else 99, d["source"]))
+        return out
+
     @staticmethod
     def _evidence_urls(finding) -> list[str]:
         ev = finding.evidence or {}
@@ -214,6 +255,25 @@ class Reporter:
                 lines.append(f"- {k}: **{counts[k]}**")
         lines.append(f"- findings: **{counts.get('findings', 0)}**")
         lines.append("")
+
+        health = self._source_health()
+        if health:
+            problems = [h for h in health if h["status"] in
+                        ("rate_limited", "forbidden", "unreachable", "server_error", "http_error")]
+            lines.append("## Recon coverage")
+            if problems:
+                lines.append(f"> ⚠️ {len(problems)} source(s) did not return data "
+                             "(rate-limited / blocked / timed out) — an empty section below may "
+                             "mean the source failed, not that nothing exists. Add API keys or "
+                             "re-run to fill the gaps.")
+                lines.append("")
+            lines.append("| Source | Result | Count |")
+            lines.append("| --- | --- | --- |")
+            for h in health:
+                label = self._HEALTH_LABEL.get(h["status"], h["status"])
+                cnt = h["count"] if h["count"] else "—"
+                lines.append(f"| {h['source']} | {label} | {cnt} |")
+            lines.append("")
 
         llm = self._llm()
         if llm:
@@ -380,6 +440,29 @@ class Reporter:
             )
             gallery_html = f'<section><h2>Visual triage ({len(shots)})</h2><div class="gallery">{cells}</div></section>'
 
+        health = self._source_health()
+        coverage_html = ""
+        if health:
+            bad = {"rate_limited", "forbidden", "unreachable", "server_error", "http_error"}
+            problems = [h for h in health if h["status"] in bad]
+            rows = ""
+            for h in health:
+                label = self._HEALTH_LABEL.get(h["status"], h["status"])
+                cls = "bad" if h["status"] in bad else ("warn" if h["status"] == "no_key" else "good")
+                cnt = h["count"] if h["count"] else "—"
+                rows += (f'<tr><td>{esc(h["source"])}</td>'
+                         f'<td class="{cls}">{esc(label)}</td><td>{cnt}</td></tr>')
+            warn = ""
+            if problems:
+                warn = (f'<p class="cov-warn">⚠️ {len(problems)} source(s) did not return data '
+                        "(rate-limited / blocked / timed out). An empty section may mean a source "
+                        "failed, not that nothing exists — add API keys or re-run to fill gaps.</p>")
+            coverage_html = (
+                '<section><h2>Recon coverage</h2>' + warn +
+                '<table><thead><tr><th>Source</th><th>Result</th><th>Count</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table></section>'
+            )
+
         summary_txt = getattr(self.store, "advice_summary", "")
         summary_html = (f'<section><h2>Analyst read</h2><p>{esc(summary_txt)}</p></section>'
                         if summary_txt else "")
@@ -445,6 +528,8 @@ class Reporter:
   th {{ background:#1c2128; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:.5px; }}
   td.score {{ font-weight:700; color:var(--accent); }}
   td.sig {{ color:var(--muted); font-size:12px; }}
+  td.good {{ color:#3fb950; }} td.warn {{ color:#d29922; }} td.bad {{ color:#f85149; font-weight:700; }}
+  .cov-warn {{ background:#2d2212; border:1px solid #9e6a03; border-radius:8px; padding:10px 14px; color:#e3b341; font-size:13px; }}
   code {{ background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }}
   .gallery {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }}
   figure {{ margin:0; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }}
@@ -460,6 +545,7 @@ class Reporter:
 </header>
 <main>
   <section><h2>Attack surface</h2><div class="cards">{cards}</div></section>
+  {coverage_html}
   {summary_html}
   {advice_html}
   {llm_html}

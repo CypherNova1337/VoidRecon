@@ -47,7 +47,7 @@ class RunContext:
             httpc = self.config.section("http")
             auth = self.config.section("auth")
             self._http = HttpClient(
-                user_agent=self.config.get("general.user_agent", "VoidRecon/0.3"),
+                user_agent=self.config.get("general.user_agent", "VoidRecon/0.4"),
                 rate=float(opsec.get("requests_per_second", 8.0)),
                 jitter=float(opsec.get("jitter", 0.0)),
                 concurrency=int(opsec.get("max_concurrency", 20)),
@@ -79,6 +79,23 @@ class RunContext:
 
     def source_key(self, name: str) -> str | None:
         return self.config.get(f"sources.{name}")
+
+    def note_source(self, source: str, seed: str, outcome, count: int) -> None:
+        """Record what a passive source returned, so zeros can be explained.
+
+        ``outcome`` is an :class:`~voidrecon.core.http.Outcome`. A transport
+        success that parsed to nothing is downgraded to ``empty`` so the report
+        distinguishes 'reached it, nothing there' from 'never got a usable
+        reply'."""
+        status = getattr(outcome, "status", "ok")
+        http_status = getattr(outcome, "http_status", None)
+        if status == "ok" and count == 0:
+            status = "empty"
+        self.store.record_source(source, seed, status, count=count, http_status=http_status)
+
+    def note_no_key(self, source: str, seed: str) -> None:
+        """Record that a key-gated source was skipped for want of an API key."""
+        self.store.record_source(source, seed, "no_key", count=0)
 
     # ---- emitting results (with scope tagging) ----------------------------
     def add_asset(

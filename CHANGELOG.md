@@ -7,6 +7,26 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.4.0] — Specter
+
+### Fixed / improved (recon visibility — the "sections come back zero" problem)
+- **Passive sources no longer fail silently.** Previously a rate-limit (429), a
+  block (403), a timeout, and a genuine "nothing there" all collapsed to the same
+  empty result — so you could not tell a dead source from an empty target. Fetches
+  are now *classified* (ok / empty / rate-limited / blocked / timed-out / needs-key)
+  and each source records what it actually returned.
+- **Rate limits are retried, not fatal.** HTTP 429 responses are honoured
+  (`Retry-After` aware, exponential backoff), so a throttled source recovers
+  within the run instead of contributing nothing. crt.sh and the Wayback CDX index
+  get a longer timeout and a retry — the single richest keyless sources no longer
+  drop out on a transient stall.
+- **New "Recon coverage" panel.** Every run now prints a per-source health table
+  (terminal + Markdown + HTML): what each source returned, with failed sources
+  flagged and a banner warning that an empty section may be a failed source, not an
+  empty target — with the fix (add API keys / re-run) called out.
+- **More keyless subdomain sources.** Added RapidDNS and subdomain.center to the
+  passive aggregator, so coverage no longer hinges on paid keys.
+
 ## [0.3.3]
 
 ### Added

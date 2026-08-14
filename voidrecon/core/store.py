@@ -21,6 +21,7 @@ class DataStore:
     def __init__(self) -> None:
         self._assets: dict[str, Asset] = {}
         self._findings: dict[str, Finding] = {}
+        self._source_health: list[dict] = []
         self._lock = threading.RLock()
 
     # ---- assets -----------------------------------------------------------
@@ -67,6 +68,23 @@ class DataStore:
         with self._lock:
             return list(self._findings.values())
 
+    # ---- recon source health ---------------------------------------------
+    def record_source(self, source: str, seed: str, status: str,
+                      count: int = 0, http_status: int | None = None) -> None:
+        """Log what one recon source actually returned for one seed.
+
+        Lets the report explain a zero: 'nothing there' vs 'rate-limited /
+        blocked / timed out / needs a key'."""
+        with self._lock:
+            self._source_health.append({
+                "source": source, "seed": seed, "status": status,
+                "count": int(count), "http_status": http_status,
+            })
+
+    def source_health(self) -> list[dict]:
+        with self._lock:
+            return list(self._source_health)
+
     # ---- stats / export ---------------------------------------------------
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = defaultdict(int)
@@ -80,6 +98,7 @@ class DataStore:
             "assets": [a.to_dict() for a in self._assets.values()],
             "findings": [f.to_dict() for f in self._findings.values()],
             "counts": self.counts(),
+            "source_health": list(self._source_health),
         }
 
     def save_json(self, path: str | Path) -> Path:

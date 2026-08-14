@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from voidrecon.core.context import RunContext
+from voidrecon.core.http import Outcome
 from voidrecon.core.models import AssetKind, Confidence
 from voidrecon.core.module import Module, Phase, register
 from voidrecon.core.tools import run_tool
@@ -48,6 +50,8 @@ class PassiveSubdomains(Module):
             self._anubis(ctx, apex),
             self._hackertarget(ctx, apex),
             self._urlscan(ctx, apex),
+            self._rapiddns(ctx, apex),
+            self._subdomain_center(ctx, apex),
             self._securitytrails(ctx, apex),
             self._virustotal(ctx, apex),
             self._censys(ctx, apex),
@@ -60,138 +64,182 @@ class PassiveSubdomains(Module):
                 out |= res
         return out
 
+    @staticmethod
+    def _clean(hosts, apex: str) -> set[str]:
+        out = set()
+        for h in hosts:
+            h = net.normalize_host(h)
+            if h and net.is_domain(h) and net.is_subdomain_of(h, apex):
+                out.add(h)
+        return out
+
     # ---- keyless sources --------------------------------------------------
     async def _certspotter(self, ctx: RunContext, apex: str) -> set[str]:
-        data = await ctx.http.get_json(
+        o = await ctx.http.fetch(
             "https://api.certspotter.com/v1/issuances",
             params={"domain": apex, "include_subdomains": "true", "expand": "dns_names"},
         )
-        out: set[str] = set()
-        if isinstance(data, list):
-            for row in data:
-                for name in row.get("dns_names", []) or []:
-                    out.add(net.normalize_host(name))
+        names: set[str] = set()
+        if o.ok and isinstance(o.json, list):
+            for row in o.json:
+                names.update(row.get("dns_names", []) or [])
+        out = self._clean(names, apex)
+        ctx.note_source("certspotter", apex, o, len(out))
         return out
 
     async def _otx(self, ctx: RunContext, apex: str) -> set[str]:
-        data = await ctx.http.get_json(
+        o = await ctx.http.fetch(
             f"https://otx.alienvault.com/api/v1/indicators/domain/{apex}/passive_dns"
         )
-        out: set[str] = set()
-        if isinstance(data, dict):
-            for row in data.get("passive_dns", []) or []:
-                host = row.get("hostname")
-                if host:
-                    out.add(net.normalize_host(host))
+        names: set[str] = set()
+        if o.ok and isinstance(o.json, dict):
+            for row in o.json.get("passive_dns", []) or []:
+                if row.get("hostname"):
+                    names.add(row["hostname"])
+        out = self._clean(names, apex)
+        ctx.note_source("otx", apex, o, len(out))
         return out
 
     async def _anubis(self, ctx: RunContext, apex: str) -> set[str]:
-        data = await ctx.http.get_json(f"https://jldc.me/anubis/subdomains/{apex}")
-        if isinstance(data, list):
-            return {net.normalize_host(h) for h in data if h}
-        return set()
+        o = await ctx.http.fetch(f"https://jldc.me/anubis/subdomains/{apex}")
+        names = set(o.json) if o.ok and isinstance(o.json, list) else set()
+        out = self._clean(names, apex)
+        ctx.note_source("anubis", apex, o, len(out))
+        return out
 
     async def _hackertarget(self, ctx: RunContext, apex: str) -> set[str]:
-        text = await ctx.http.get_text(
-            "https://api.hackertarget.com/hostsearch/", params={"q": apex}
+        o = await ctx.http.fetch(
+            "https://api.hackertarget.com/hostsearch/", params={"q": apex}, want="text"
         )
-        out: set[str] = set()
-        if text and "error" not in text.lower() and "api count" not in text.lower():
+        names: set[str] = set()
+        text = o.text or ""
+        # hackertarget returns 200 with an error/quota body — treat as rate-limited.
+        if o.ok and ("api count" in text.lower() or "error" in text.lower()):
+            o = Outcome("rate_limited", o.http_status)
+        elif o.ok:
             for line in text.splitlines():
                 host = line.split(",", 1)[0].strip()
                 if host:
-                    out.add(net.normalize_host(host))
+                    names.add(host)
+        out = self._clean(names, apex)
+        ctx.note_source("hackertarget", apex, o, len(out))
         return out
 
     async def _urlscan(self, ctx: RunContext, apex: str) -> set[str]:
-        data = await ctx.http.get_json(
+        o = await ctx.http.fetch(
             "https://urlscan.io/api/v1/search/", params={"q": f"page.domain:{apex}", "size": 1000}
         )
-        out: set[str] = set()
-        if isinstance(data, dict):
-            for row in data.get("results", []) or []:
+        names: set[str] = set()
+        if o.ok and isinstance(o.json, dict):
+            for row in o.json.get("results", []) or []:
                 host = (row.get("page") or {}).get("domain")
                 if host:
-                    out.add(net.normalize_host(host))
+                    names.add(host)
+        out = self._clean(names, apex)
+        ctx.note_source("urlscan", apex, o, len(out))
+        return out
+
+    async def _rapiddns(self, ctx: RunContext, apex: str) -> set[str]:
+        # Keyless HTML source; parse hostnames out of the results table.
+        o = await ctx.http.fetch(
+            f"https://rapiddns.io/subdomain/{apex}", params={"full": "1"}, want="text"
+        )
+        names: set[str] = set()
+        if o.ok and o.text:
+            names = set(re.findall(r"<td>([A-Za-z0-9_.-]+\.%s)</td>" % re.escape(apex), o.text))
+        out = self._clean(names, apex)
+        ctx.note_source("rapiddns", apex, o, len(out))
+        return out
+
+    async def _subdomain_center(self, ctx: RunContext, apex: str) -> set[str]:
+        o = await ctx.http.fetch("https://api.subdomain.center/", params={"domain": apex})
+        names = set(o.json) if o.ok and isinstance(o.json, list) else set()
+        out = self._clean(names, apex)
+        ctx.note_source("subdomain.center", apex, o, len(out))
         return out
 
     # ---- optional key-based sources --------------------------------------
     async def _securitytrails(self, ctx: RunContext, apex: str) -> set[str]:
         key = ctx.source_key("securitytrails_api_key")
         if not key:
+            ctx.note_no_key("securitytrails", apex)
             return set()
-        data = await ctx.http.get_json(
+        o = await ctx.http.fetch(
             f"https://api.securitytrails.com/v1/domain/{apex}/subdomains",
             headers={"APIKEY": key},
         )
-        out: set[str] = set()
-        if isinstance(data, dict):
-            for sub in data.get("subdomains", []) or []:
-                out.add(net.normalize_host(f"{sub}.{apex}"))
+        names: set[str] = set()
+        if o.ok and isinstance(o.json, dict):
+            for sub in o.json.get("subdomains", []) or []:
+                names.add(f"{sub}.{apex}")
+        out = self._clean(names, apex)
+        ctx.note_source("securitytrails", apex, o, len(out))
         return out
 
     async def _virustotal(self, ctx: RunContext, apex: str) -> set[str]:
         key = ctx.source_key("virustotal_api_key")
         if not key:
+            ctx.note_no_key("virustotal", apex)
             return set()
-        data = await ctx.http.get_json(
+        o = await ctx.http.fetch(
             f"https://www.virustotal.com/api/v3/domains/{apex}/subdomains",
             headers={"x-apikey": key},
             params={"limit": 1000},
         )
-        out: set[str] = set()
-        if isinstance(data, dict):
-            for row in data.get("data", []) or []:
-                host = row.get("id")
-                if host:
-                    out.add(net.normalize_host(host))
+        names: set[str] = set()
+        if o.ok and isinstance(o.json, dict):
+            for row in o.json.get("data", []) or []:
+                if row.get("id"):
+                    names.add(row["id"])
+        out = self._clean(names, apex)
+        ctx.note_source("virustotal", apex, o, len(out))
         return out
 
     async def _censys(self, ctx: RunContext, apex: str) -> set[str]:
         api_id = ctx.source_key("censys_api_id")
         api_secret = ctx.source_key("censys_api_secret")
         if not (api_id and api_secret):
+            ctx.note_no_key("censys", apex)
             return set()
-        out: set[str] = set()
+        names: set[str] = set()
         cursor = None
+        last: Outcome = Outcome("unreachable")
         for _ in range(5):  # bounded pagination
             params = {"q": apex, "per_page": 100}
             if cursor:
                 params["cursor"] = cursor
-            resp = await ctx.http.get(
+            last = await ctx.http.fetch(
                 "https://search.censys.io/api/v2/hosts/search",
                 params=params, auth=(api_id, api_secret),
             )
-            if resp is None or resp.status_code >= 400:
+            if not last.ok or not isinstance(last.json, dict):
                 break
-            try:
-                data = resp.json()
-            except Exception:
-                break
-            result = data.get("result", {})
+            result = last.json.get("result", {})
             for hit in result.get("hits", []) or []:
-                for name in hit.get("dns", {}).get("names", []) or hit.get("names", []) or []:
-                    out.add(net.normalize_host(name))
-                for cert in hit.get("names", []) or []:
-                    out.add(net.normalize_host(cert))
+                names.update(hit.get("dns", {}).get("names", []) or [])
+                names.update(hit.get("names", []) or [])
             cursor = (result.get("links", {}) or {}).get("next")
             if not cursor:
                 break
+        out = self._clean(names, apex)
+        ctx.note_source("censys", apex, last, len(out))
         return out
 
     # ---- hybrid: external tool -------------------------------------------
     async def _subfinder(self, ctx: RunContext, apex: str) -> set[str]:
         if not ctx.tools.has("subfinder"):
-            return set()
+            return set()   # not installed — not a source failure, so stay silent
         result = await run_tool("subfinder", ["-silent", "-d", apex, "-oJ"], timeout=180)
-        out: set[str] = set()
+        names: set[str] = set()
         if result.ok:
             for line in result.lines():
                 try:
                     row = json.loads(line)
                     host = row.get("host") or row.get("input")
                     if host:
-                        out.add(net.normalize_host(host))
+                        names.add(host)
                 except json.JSONDecodeError:
-                    out.add(net.normalize_host(line))
+                    names.add(line)
+        out = self._clean(names, apex)
+        ctx.store.record_source("subfinder", apex, "ok" if out else "empty", count=len(out))
         return out

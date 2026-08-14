@@ -119,6 +119,32 @@ voidrecon run target.com --profile deep --notify-webhook https://hooks.slack.com
 export VOIDRECON_NOTIFY_TELEGRAM_TOKEN=123:abc VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID=456789
 ```
 
+## Recon coverage — you can see what actually ran
+
+Passive OSINT sources fail in ways that used to be invisible: a rate-limit, a
+block, or a timeout looked identical to "nothing there," so a section coming back
+empty told you nothing. Every run now ends with a **Recon coverage** panel (in the
+terminal and in the report) showing exactly what each source returned:
+
+```
+Recon coverage:
+  ✓ crt.sh           ok (63)
+  ✓ certspotter      ok (12)
+  ✗ hackertarget     RATE-LIMITED
+  ✗ urlscan          BLOCKED (403/401)
+  • securitytrails   needs API key
+  • otx              nothing found
+
+  ⚠ 2 source(s) failed (rate-limited/blocked/timed out): hackertarget, urlscan.
+    An empty section may be a failed source, not an empty target —
+    add API keys (voidrecon setup) or re-run to fill gaps.
+```
+
+Rate-limited sources (HTTP 429) are retried honouring `Retry-After` instead of
+being dropped, and the slow-but-rich sources (crt.sh, the Wayback index) get a
+longer timeout and a retry so they stop silently falling out. `otx: nothing found`
+is a real empty; `hackertarget: RATE-LIMITED` is a gap you can close.
+
 ## Output & review
 
 Each run folder (`runs/<target>-<timestamp>/`) contains the JSON/Markdown/HTML report **plus ready-to-use candidate lists** — one file per vulnerability class, so you can feed a whole class straight into the right tool.

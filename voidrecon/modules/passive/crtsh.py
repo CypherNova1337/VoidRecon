@@ -32,20 +32,28 @@ class CrtSh(Module):
             self.log.info("crt.sh discovered %d subdomain observations", total)
 
     async def _query(self, ctx: RunContext, apex: str) -> int:
-        data = await ctx.http.get_json(
-            "https://crt.sh/", params={"q": f"%.{apex}", "output": "json"}
-        )
-        if not data:
-            return 0
+        # crt.sh is the richest keyless source but routinely slow — give it a
+        # generous timeout and a second attempt before writing it off, otherwise
+        # a transient stall silently costs us the best source.
+        outcome = None
+        for attempt in range(2):
+            outcome = await ctx.http.fetch(
+                "https://crt.sh/", params={"q": f"%.{apex}", "output": "json"},
+                timeout=60.0,
+            )
+            if outcome.ok or not outcome.failed:
+                break
         names: set[str] = set()
-        for row in data:
-            for field in ("name_value", "common_name"):
-                value = row.get(field) or ""
-                for line in value.splitlines():
-                    host = net.normalize_host(line)
-                    if host and net.is_domain(host) and net.is_subdomain_of(host, apex):
-                        names.add(host)
+        if outcome and outcome.ok and isinstance(outcome.json, list):
+            for row in outcome.json:
+                for field in ("name_value", "common_name"):
+                    value = row.get(field) or ""
+                    for line in value.splitlines():
+                        host = net.normalize_host(line)
+                        if host and net.is_domain(host) and net.is_subdomain_of(host, apex):
+                            names.add(host)
         for host in names:
             kind = AssetKind.DOMAIN if host == apex else AssetKind.SUBDOMAIN
             ctx.add_asset(kind, host, source=self.name, confidence=Confidence.LIKELY)
+        ctx.note_source("crt.sh", apex, outcome, len(names))
         return len(names)
