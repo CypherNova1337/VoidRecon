@@ -31,8 +31,10 @@ log = get_logger("llm")
 _SYSTEM_PROMPT = (
     "You are a senior offensive-security analyst supporting an AUTHORIZED bug "
     "bounty engagement. You are given a digest of reconnaissance assets with "
-    "heuristic priority scores. Reason about the attack surface and respond with "
-    "strict JSON only, matching this schema:\n"
+    "heuristic priority scores, plus VoidRecon's own heuristic attack plan "
+    "(per-host chains it already reasoned out). Build on that plan — confirm, "
+    "correct, sharpen, and add anything the heuristics under-weighted; do not "
+    "merely restate it. Respond with strict JSON only, matching this schema:\n"
     "{\n"
     '  "summary": "2-4 sentence overview of the surface",\n'
     '  "priority_targets": [{"asset": "host", "why": "reason", "suggested_checks": ["..."]}],\n'
@@ -94,9 +96,20 @@ class LLMClient:
         digest = self._digest()
         if not digest:
             return None
+        plan = getattr(self.ctx.store, "battle_plan", None) or {}
+        heuristic_plan = {
+            "plays": (plan.get("plays") or [])[:8],
+            "targets": [
+                {"asset": t["asset"], "score": t["score"], "signals": t["signals"],
+                 "brief": t["brief"]}
+                for t in (plan.get("targets") or [])[:12]
+            ],
+        }
         user_msg = (
-            "Reconnaissance digest (JSON). Analyse and return the required JSON.\n\n"
-            + json.dumps({"target": self.ctx.scope.seeds, "assets": digest}, default=str)
+            "Reconnaissance digest and VoidRecon's heuristic attack plan (JSON). "
+            "Build on the plan and return the required JSON.\n\n"
+            + json.dumps({"target": self.ctx.scope.seeds, "assets": digest,
+                          "heuristic_plan": heuristic_plan}, default=str)
         )
         try:
             raw = await self._call(user_msg)

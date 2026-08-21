@@ -7,6 +7,31 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.5.0] — Oracle
+
+### The Analyst — the built-in AI is now a reasoning layer, not a template
+- **Per-host reasoning.** A new always-on, keyless Analyst fuses each host's own
+  signals (name tokens, HTTP posture, tech, exposure) with the findings actually
+  landed on it, and writes a grounded **target dossier** — what the host is, why it
+  matters, and the concrete next play. Reasoning happens per host, not over a flat
+  global tag list.
+- **Multi-signal attack chains.** It recognises plays that only make sense when
+  several signals co-occur on the *same* host — e.g. *secret + auth-gate →
+  "validate the leaked credential against the gate"*, *SQLi + admin → "SQLi on a
+  privileged surface"* — and emits ready-to-run commands (real URL substituted).
+  A chain does **not** fire when its signals are split across different hosts.
+- **Finding-aware scoring.** Asset priority now folds in the findings on a host, so
+  a host with a real HIGH finding outranks one that merely *looks* juicy by name —
+  evidence beats hunches.
+- **Findings are never dropped.** A host named only by a finding (no discovery
+  module recorded it as an asset) is still reasoned about and can top the plan.
+- **Surfaced everywhere.** The battle plan (highest-value plays + dossiers) prints
+  in the terminal and renders as new **Attack plan** / **Target dossiers** sections
+  in the Markdown and HTML reports.
+- **LLM builds on it.** When the optional model is enabled it is now seeded with the
+  Analyst's chains and dossiers and asked to sharpen them, instead of starting from
+  a bare asset list.
+
 ## [0.4.0] — Specter
 
 ### Fixed / improved (recon visibility — the "sections come back zero" problem)

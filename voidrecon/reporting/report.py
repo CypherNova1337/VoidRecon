@@ -22,6 +22,7 @@ from pathlib import Path
 from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Severity
 from voidrecon.intel.scoring import top_assets
+from voidrecon.utils.text import truncate
 from voidrecon.version import __version__
 
 _SEV_ORDER = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]
@@ -294,6 +295,29 @@ class Reporter:
             lines.append(summary_txt)
             lines.append("")
 
+        plan = getattr(self.store, "battle_plan", None) or {}
+        plays = plan.get("plays") or []
+        if plays:
+            lines.append("## Attack plan — highest-value plays")
+            for i, p in enumerate(plays, 1):
+                lines.append(f"{i}. **{p['name']}** on `{p['asset']}` _(impact {p['impact']})_")
+                lines.append(f"   - {p['how']}")
+                if p.get("command"):
+                    lines.append(f"   - `{p['command']}`")
+            lines.append("")
+        targets = plan.get("targets") or []
+        if targets:
+            lines.append("## Target dossiers")
+            for t in targets:
+                lines.append(f"### {t['asset']} — score {t['score']:.0f}")
+                lines.append(t["brief"])
+                if t.get("findings"):
+                    fl = ", ".join(f"[{f['severity'].upper()}] {f['title']}" for f in t["findings"][:4])
+                    lines.append(f"- **Findings:** {fl}")
+                if t.get("signals"):
+                    lines.append(f"- **Signals:** {', '.join(t['signals'])}")
+                lines.append("")
+
         advice = self._advice()
         if advice:
             lines.append("## Recommended next steps")
@@ -466,6 +490,41 @@ class Reporter:
         summary_txt = getattr(self.store, "advice_summary", "")
         summary_html = (f'<section><h2>Analyst read</h2><p>{esc(summary_txt)}</p></section>'
                         if summary_txt else "")
+
+        plan = getattr(self.store, "battle_plan", None) or {}
+        plan_html = ""
+        plays = plan.get("plays") or []
+        targets = plan.get("targets") or []
+        if plays or targets:
+            play_items = ""
+            for p in plays:
+                cmd = (f'<div class="refs"><code>{esc(p["command"])}</code></div>'
+                       if p.get("command") else "")
+                play_items += (
+                    f'<div class="finding"><strong>{esc(p["name"])}</strong> '
+                    f'<span class="pill">impact {p["impact"]}</span>'
+                    f'<div class="meta">on <code>{esc(p["asset"])}</code></div>'
+                    f'<p>{esc(p["how"])}</p>{cmd}</div>')
+            dossier_items = ""
+            for t in targets:
+                fl = ""
+                if t.get("findings"):
+                    fl = '<div class="meta">' + " · ".join(
+                        f'[{esc(f["severity"].upper())}] {esc(truncate(f["title"], 70))}'
+                        for f in t["findings"][:4]) + "</div>"
+                sg = (f'<div class="meta">signals: {esc(", ".join(t["signals"]))}</div>'
+                      if t.get("signals") else "")
+                dossier_items += (
+                    f'<div class="finding"><strong>{esc(t["asset"])}</strong> '
+                    f'<span class="pill">score {t["score"]:.0f}</span>'
+                    f'<p>{esc(t["brief"])}</p>{fl}{sg}</div>')
+            plan_html = (
+                (f'<section><h2>Attack plan — highest-value plays</h2>{play_items}</section>'
+                 if play_items else "")
+                + (f'<section><h2>Target dossiers</h2>{dossier_items}</section>'
+                   if dossier_items else "")
+            )
+
         advice = self._advice()
         advice_html = ""
         if advice:
@@ -530,6 +589,7 @@ class Reporter:
   td.sig {{ color:var(--muted); font-size:12px; }}
   td.good {{ color:#3fb950; }} td.warn {{ color:#d29922; }} td.bad {{ color:#f85149; font-weight:700; }}
   .cov-warn {{ background:#2d2212; border:1px solid #9e6a03; border-radius:8px; padding:10px 14px; color:#e3b341; font-size:13px; }}
+  .pill {{ background:#1f6feb33; color:#79c0ff; border:1px solid #1f6feb55; border-radius:20px; padding:1px 9px; font-size:11px; font-weight:700; }}
   code {{ background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }}
   .gallery {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }}
   figure {{ margin:0; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }}
@@ -547,6 +607,7 @@ class Reporter:
   <section><h2>Attack surface</h2><div class="cards">{cards}</div></section>
   {coverage_html}
   {summary_html}
+  {plan_html}
   {advice_html}
   {llm_html}
   <section id="findings"><h2>Findings</h2>{findings_html}</section>

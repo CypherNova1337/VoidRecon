@@ -113,10 +113,51 @@ def score_asset(asset: Asset) -> tuple[float, list[str]]:
     return round(score, 2), reasons
 
 
+# What a landed finding is worth to an asset's priority, by severity. The whole
+# point: a host we already found a real problem on should outrank one that merely
+# *looks* juicy by name.
+_SEV_BONUS = {"critical": 45, "high": 28, "medium": 13, "low": 5, "info": 1}
+# Extra weight for finding classes that tend to chain into serious impact.
+_TAG_BONUS = {
+    "sqli": 10, "ssti": 10, "rce": 12, "takeover": 12, "secret": 10,
+    "exposure": 8, "introspection": 7, "cors": 5, "open-redirect": 4, "xss": 5,
+}
+
+
+def _findings_by_asset(store: DataStore) -> dict[str, list]:
+    """Index findings by the asset string they name, plus by bare host, so a
+    finding on ``https://h/p?x=1`` still credits host ``h``."""
+    from voidrecon.utils import net
+
+    idx: dict[str, list] = {}
+    for f in store.findings():
+        keys = set()
+        if f.asset:
+            keys.add(f.asset.lower())
+            host = net.host_from_url(f.asset) or net.normalize_host(f.asset)
+            if host:
+                keys.add(host.lower())
+        for k in keys:
+            idx.setdefault(k, []).append(f)
+    return idx
+
+
 def score_store(store: DataStore) -> None:
+    idx = _findings_by_asset(store)
     for asset in store.iter_assets():
         score, reasons = score_asset(asset)
-        asset.score = score
+        # Fold in the findings actually landed on this asset — evidence outranks
+        # name-based hunches.
+        hits = idx.get(asset.value.lower(), [])
+        if hits:
+            best = max(hits, key=lambda f: f.severity.rank)
+            bonus = _SEV_BONUS.get(best.severity.value, 0)
+            tags = {t for f in hits for t in f.tags}
+            tag_bonus = min(sum(_TAG_BONUS.get(t, 0) for t in tags), 24)
+            if bonus or tag_bonus:
+                score = min(score + bonus + tag_bonus, 100.0)
+                reasons.append(f"findings:{len(hits)}×(best={best.severity.value},+{bonus + tag_bonus})")
+        asset.score = round(score, 2)
         if reasons:
             asset.attrs["score_reasons"] = reasons
 

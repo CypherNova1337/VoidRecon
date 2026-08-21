@@ -548,11 +548,20 @@ async def _run(args) -> int:
     if not args.quiet:
         _print_recon_coverage(reporter)
 
-    # Advisor — the built-in analyst read + "what to do next" plan.
+    # The Analyst — grounded read + the battle plan (top plays), then the plan.
     advice = getattr(ctx.store, "advice", []) or []
     summary_txt = getattr(ctx.store, "advice_summary", "")
+    plan = getattr(ctx.store, "battle_plan", None) or {}
     if summary_txt and not args.quiet:
         print(f"\n\033[1mAnalyst read:\033[0m {summary_txt}")
+    plays = (plan.get("plays") or [])[:4]
+    if plays and not args.quiet:
+        print("\n\033[1mAttack plan — highest-value plays:\033[0m")
+        for i, p in enumerate(plays, 1):
+            print(f"  {i}. \033[36m{p['name']}\033[0m on {p['asset']}  \033[2m(impact {p['impact']})\033[0m")
+            print(f"     {p['how']}")
+            if p.get("command"):
+                print(f"     → {p['command']}")
     if advice and not args.quiet:
         print("\n\033[1mRecommended next steps:\033[0m")
         for i, rec in enumerate(advice[:5], 1):

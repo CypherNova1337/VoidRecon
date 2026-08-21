@@ -10,7 +10,7 @@
 
 ### Adversary-minded reconnaissance for authorized bug bounty & pentest engagements
 
-**49 modules · 7 phases · Built-in AI Advisor**
+**49 modules · 7 phases · Built-in AI Analyst (keyless)**
 
 *by [VoidSec-Hub](https://github.com/CypherNova1337)*
 
@@ -20,7 +20,7 @@
 
 > 🚧 **Work in progress** — under active development; interfaces may shift between releases. The engine and everything below work today.
 
-VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and focused on the forgotten corners** that checklists skip. It's not three tools in a pipe; it's a full recon engine with a scope conscience, a scoring brain, a built-in advisor that tells you what to do next, a live progress checklist, resumable and distributable runs, and reports you can actually use.
+VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and focused on the forgotten corners** that checklists skip. It's not three tools in a pipe; it's a full recon engine with a scope conscience, a scoring brain, a built-in Analyst that reasons out your next move, a live progress checklist, resumable and distributable runs, and reports you can actually use.
 
 > ⚠️ **Authorized use only.** Passive collection is on by default. Anything that touches a target is gated behind `--active`/`--profile` **and** a positive in-scope check. Stay within your program's scope and the law.
 
@@ -92,7 +92,7 @@ VoidRecon runs as ordered **phases**, each enriching one shared, de-duplicated d
 | **active** | HTTP probing/fingerprinting, port discovery, live TLS-SAN harvesting | **Yes** |
 | **content** | Native + SPA crawling, dir/file fuzzing, parameter discovery, vhosts, CSP mining, deep tech fingerprint, CMS enum, JS mining + source maps, favicon/tracker pivoting, API + GraphQL, email harvesting, WAF detection, origin-IP unmasking, screenshots | **Yes** |
 | **vuln** | CVE correlation, subdomain-takeover verification, SQLi/SSRF/SSTI/CRLF/XSS/prototype-pollution/cache-deception/open-redirect probing, vuln-hint URL classification, JWT analysis, header/CORS/cookie analysis | **Yes** |
-| **intel** | Scoring, correlation, **the Advisor**, optional LLM analysis | No |
+| **intel** | Finding-aware scoring, correlation, **the Analyst** (attack chains + dossiers), optional LLM | No |
 
 See everything with `voidrecon modules`.
 
@@ -100,9 +100,20 @@ See everything with `voidrecon modules`.
 
 VoidRecon's "brain" works with **no API key and no limits** — the AI value doesn't depend on a paid LLM plan:
 
-- **Scoring** ranks every asset by juiciness (dev/admin/API/exposed signals, risky ports, dangling records, secrets).
-- **The Advisor** reads the whole run and writes a plain-English **analyst summary** plus a ranked **next-step plan** — each step naming the assets and a ready-to-run command. It prints at the end of every run and headlines the report.
-- **Optional LLM** (`--ai`) augments the plan when you have a key (OpenAI / Anthropic / local Ollama). Purely additive — everything above works without it.
+- **Finding-aware scoring** ranks every asset by juiciness (dev/admin/API/exposed signals, risky ports, dangling records, secrets) *and folds in the findings actually landed on it* — a host with a real HIGH bug outranks one that merely looks juicy by name.
+- **The Analyst** reasons per host, not over a flat list. For each promising target it fuses the host's signals with its findings, recognises **multi-signal attack chains** that only make sense when several things co-occur on the *same* host, and writes a grounded **dossier** — what the host is, why it matters, and the exact play to run next:
+
+  ```
+  Attack plan — highest-value plays:
+    1. Leaked credential → authenticated access  on admin-api.target.com  (impact 92)
+       A secret leaks on a host that also gates access. Validate the secret
+       against the login/API — a live key walks you straight past the gate.
+    2. SQLi on a privileged surface  on admin-api.target.com  (impact 86)
+       → sqlmap -u 'https://admin-api.target.com/flows?id=1' --batch --risk 2 --level 3
+  ```
+
+  A chain fires only on real co-occurrence — a secret on one host and a login gate on another won't invent a play. The plan prints at the end of every run and renders as **Attack plan** / **Target dossiers** in the report.
+- **Optional LLM** (`--ai`) is *seeded with the Analyst's chains and dossiers* and asked to sharpen them (OpenAI / Anthropic / local Ollama) — it refines real reasoning instead of starting from scratch. Purely additive; everything above works without it.
 
 ```bash
 voidrecon run target.com --profile standard --ai         # uses configured LLM if present

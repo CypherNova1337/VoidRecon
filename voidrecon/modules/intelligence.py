@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from voidrecon.core.context import RunContext
 from voidrecon.core.module import Module, Phase, register
-from voidrecon.intel import advisor
+from voidrecon.intel import advisor, analyst
 from voidrecon.intel import correlate as correlate_mod
 from voidrecon.intel import scoring
 from voidrecon.intel.llm import LLMClient
@@ -35,10 +35,19 @@ class Intelligence(Module):
         if top:
             self.log.info("top target: %s (score %.0f)", top[0].value, top[0].score)
 
-        # Advisor: heuristic, always-on "what to do next" plan + narrative summary.
+        # The Analyst: reason over the scored surface + findings to build a battle
+        # plan (per-target dossiers + attack chains) and a grounded narrative read.
+        plan = analyst.analyze(ctx)
+        setattr(ctx.store, "battle_plan", plan)
+        setattr(ctx.store, "advice_summary", plan["summary"])
+        setattr(ctx.store, "analyst_focus", plan["focus"])
+        if plan["plays"]:
+            self.log.info("analyst: %d target(s), top play: %s on %s",
+                          len(plan["targets"]), plan["plays"][0]["name"], plan["plays"][0]["asset"])
+
+        # Advisor: the ranked, rule-based "what to do next" step list.
         advice = advisor.recommend(ctx)
         setattr(ctx.store, "advice", advice)
-        setattr(ctx.store, "advice_summary", advisor.summarize(ctx))
         if advice:
             self.log.info("advisor: %d recommended next step(s); top: %s",
                           len(advice), advice[0]["action"])

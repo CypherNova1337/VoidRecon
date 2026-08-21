@@ -22,14 +22,17 @@ def test_advisor_summary_no_findings():
     assert isinstance(text, str) and len(text) > 10
 
 
-def test_advisor_summary_attack_paths():
+def test_advisor_summary_surfaces_play():
     ctx = RunContext(Config.load(), Scope.from_lists(["example.com"]))
     ctx.store.add_finding(Finding("takeover", severity=Severity.HIGH, module="m",
                                   asset="x.example.com", tags={"takeover"}))
     ctx.store.add_finding(Finding("gql", severity=Severity.MEDIUM, module="m",
                                   asset="api.example.com", tags={"introspection"}))
     text = advisor.summarize(ctx)
-    assert "attack path" in text.lower()
+    # The Analyst reasons the takeover chain even though no discovery module
+    # recorded x.example.com as an asset — findings are evidence enough.
+    assert "highest-value play" in text.lower()
+    assert "x.example.com" in text
 
 
 def test_notify_telegram_config_present():
