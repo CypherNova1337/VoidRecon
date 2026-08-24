@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.5.1]
+
+### Fixed — no module can hang the run (from the Kraken field run)
+- **Per-module time budget.** Every module now runs under a wall-clock budget
+  (`opsec.module_timeout`, default 2h; per-module override `modules.<name>.timeout`;
+  0 disables). If a module runs past it, it is cut off, recorded as a `timeout`, and
+  the run continues — partial results kept. Previously a single runaway module could
+  stall a run indefinitely (a large target left `origin_ip` running for days).
+- **origin_ip bounded.** It now tests only the highest-scoring fronted hosts
+  (`modules.origin_ip.max_hosts`, default 15) instead of the full host×IP
+  cross-product, uses a short fail-fast per-probe timeout
+  (`modules.origin_ip.probe_timeout`, default 6s) so dead IPs don't burn 20s each,
+  and stops probing a host once its origin is found. On a large IP set this is the
+  difference between minutes and days.
+
 ## [0.5.0] — Oracle
 
 ### The Analyst — the built-in AI is now a reasoning layer, not a template

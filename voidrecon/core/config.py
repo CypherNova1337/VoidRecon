@@ -37,6 +37,10 @@ DEFAULTS: dict[str, Any] = {
         "requests_per_second": 8.0,
         "jitter": 0.3,               # +/- fraction randomly added to delays
         "timeout": 20.0,
+        # Wall-clock seconds any single module may run before it is cut off, so a
+        # stalled/runaway module can never hang the whole run. Override per module
+        # with modules.<name>.timeout; 0 disables. Partial results are kept.
+        "module_timeout": 7200.0,
         "retries": 2,
         "rotate_user_agents": True,
         "respect_out_of_scope": True,

@@ -25,6 +25,10 @@ opsec:
   requests_per_second: 8.0
   jitter: 0.3            # randomised +/- fraction added to request spacing
   timeout: 20.0
+  # Max wall-clock seconds any single module may run before it is cut off, so one
+  # stalled/runaway module can't hang the whole run. Per-module override:
+  # modules.<name>.timeout. Set to 0 to disable. Partial results are kept.
+  module_timeout: 7200.0
   retries: 2
   rotate_user_agents: true
   respect_out_of_scope: true
@@ -83,6 +87,8 @@ modules:
   #   max_origins: 40                     # cap browser-driven origins
   # origin_ip:
   #   max_candidates: 100                 # cap IPs tested for origin exposure
+  #   max_hosts: 15                       # cap fronted hosts tested (highest-scoring first)
+  #   probe_timeout: 6.0                  # per-probe timeout (dead IPs fail fast)
   # param_discovery:
   #   wordlist: /path/to/params.txt       # parameter names (bundled default)
   #   max_params: 250                     # candidates tested per endpoint

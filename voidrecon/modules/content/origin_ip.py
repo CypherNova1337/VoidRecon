@@ -42,6 +42,12 @@ class OriginIp(Module):
         if not fronted:
             self.log.info("no WAF-fronted hosts with a baseline to test")
             return
+        # Test the highest-value fronted hosts first, and cap how many — origins
+        # are shared infrastructure, so probing every one of hundreds of hosts
+        # against every IP is a days-long cross-product for no extra signal.
+        fronted.sort(key=lambda a: a.score, reverse=True)
+        max_hosts = int(ctx.config.get("modules.origin_ip.max_hosts", 15))
+        fronted = fronted[:max_hosts]
 
         # Candidate origin IPs: everything discovered, minus the CDN IPs the
         # fronted hosts already resolve to.
@@ -55,17 +61,28 @@ class OriginIp(Module):
             self.log.info("no candidate origin IPs to test")
             return
 
-        self.log.info("testing %d candidate IPs against %d fronted host(s)", len(candidates), len(fronted))
-        timeout = float(ctx.config.get("opsec.timeout", 20.0))
+        probes = len(fronted) * len(candidates)
+        self.log.info("testing up to %d candidate IPs against %d fronted host(s) (%d probes max)",
+                      len(candidates), len(fronted), probes)
+        # Origin checks don't need the full request timeout — a dead/firewalled IP
+        # should fail fast, not burn 20s each. That single change is the difference
+        # between minutes and days on a large IP set.
+        probe_timeout = float(ctx.config.get("modules.origin_ip.probe_timeout", 6.0))
         sem = asyncio.Semaphore(min(int(ctx.config.get("opsec.max_concurrency", 20)), 20))
         found = 0
+        solved: set[str] = set()   # hosts whose origin we've already located
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=probe_timeout) as client:
             async def test(host_asset, ip):
                 nonlocal found
+                if host_asset.value in solved:   # stop probing a host once solved
+                    return
                 async with sem:
+                    if host_asset.value in solved:
+                        return
                     if await self._matches(ctx, client, host_asset, ip):
                         found += 1
+                        solved.add(host_asset.value)
 
             tasks = [test(h, ip) for h in fronted for ip in candidates]
             await asyncio.gather(*tasks)

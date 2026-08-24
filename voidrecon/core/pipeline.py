@@ -8,6 +8,7 @@ source doesn't stop the mapping.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import pkgutil
 import time
@@ -102,9 +103,28 @@ class Pipeline:
         status = "ok"
         if self.monitor is not None:
             self.monitor.start_module(mod.name)
+        budget = self._module_budget(mod)
         try:
             log.info("running [bold]%s[/] — %s", mod.name, mod.description or "")
-            await mod.run(self.ctx)
+            # Every module runs under a wall-clock budget so a single stalled or
+            # runaway module (e.g. a huge Host-header cross-product) can never hang
+            # the whole engagement. Partial results already emitted are kept.
+            if budget:
+                await asyncio.wait_for(mod.run(self.ctx), timeout=budget)
+            else:
+                await mod.run(self.ctx)
+        except (asyncio.TimeoutError, TimeoutError):
+            status = "timeout"
+            log.warning("module %s exceeded its %ss time budget — moving on "
+                        "(raise modules.%s.timeout or opsec.module_timeout to allow longer)",
+                        mod.name, int(budget), mod.name)
+            self.ctx.add_finding(
+                f"Module '{mod.name}' hit its {int(budget)}s time budget and was stopped",
+                module="pipeline",
+                description=("The module ran past its allotted time and was cut off so the run "
+                             "could finish. Any results it produced before the cutoff are kept. "
+                             "Increase its budget to let it run to completion."),
+            )
         except Exception as exc:  # noqa: BLE001 - modules must never kill the run
             status = "error"
             log.error("module %s failed: %s", mod.name, exc)
@@ -127,4 +147,21 @@ class Pipeline:
         )
         log.info("  %s finished in %ss (+%d assets)", mod.name, elapsed, gained)
         if self.monitor is not None:
-            self.monitor.end_module(mod.name, "done" if status == "ok" else "error", elapsed, gained)
+            display = {"ok": "done", "timeout": "timeout"}.get(status, "error")
+            self.monitor.end_module(mod.name, display, elapsed, gained)
+
+    def _module_budget(self, mod: Module) -> float | None:
+        """Wall-clock seconds a module may run before it is cut off. A per-module
+        ``modules.<name>.timeout`` overrides the global ``opsec.module_timeout``;
+        either set to 0 disables the budget for that scope."""
+        per = self.ctx.config.get(f"modules.{mod.name}.timeout")
+        if per is not None:
+            try:
+                return float(per) or None
+            except (TypeError, ValueError):
+                pass
+        default = self.ctx.config.get("opsec.module_timeout", 7200)
+        try:
+            return float(default) or None
+        except (TypeError, ValueError):
+            return 7200.0
