@@ -10,7 +10,7 @@
 
 ### Adversary-minded reconnaissance for authorized bug bounty & pentest engagements
 
-**49 modules · 7 phases · Built-in AI Analyst (keyless)**
+**50 modules · 7 phases · Built-in AI Analyst (keyless)**
 
 *by [VoidSec-Hub](https://github.com/CypherNova1337)*
 
@@ -90,7 +90,7 @@ VoidRecon runs as ordered **phases**, each enriching one shared, de-duplicated d
 | **passive** | Cert transparency, 8+ passive-DNS sources, web archives, GitHub dorking, dork generation, cloud buckets, DNS/email (SPF/DMARC/DKIM/CAA), AXFR + SPF-chain mining, reverse-IP, breaches, Shodan enrichment | No |
 | **resolve** | DNS resolution, wildcard-aware brute-force + permutations, reverse-DNS | No |
 | **active** | HTTP probing/fingerprinting, port discovery, live TLS-SAN harvesting | **Yes** |
-| **content** | Native + SPA crawling, dir/file fuzzing, parameter discovery, vhosts, CSP mining, deep tech fingerprint, CMS enum, JS mining + source maps, favicon/tracker pivoting, API + GraphQL, email harvesting, WAF detection, origin-IP unmasking, screenshots | **Yes** |
+| **content** | Native + SPA crawling, dir/file fuzzing, parameter discovery, vhosts, CSP mining, deep tech fingerprint, CMS enum, JS mining + source maps, favicon/tracker pivoting, API + GraphQL, email harvesting, WAF detection, Cloudflare Access mapping, origin-IP unmasking, screenshots | **Yes** |
 | **vuln** | CVE correlation, subdomain-takeover verification, SQLi/SSRF/SSTI/CRLF/XSS/prototype-pollution/cache-deception/open-redirect probing, vuln-hint URL classification, JWT analysis, header/CORS/cookie analysis | **Yes** |
 | **intel** | Finding-aware scoring, correlation, **the Analyst** (attack chains + dossiers), optional LLM | No |
 

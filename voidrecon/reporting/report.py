@@ -80,6 +80,7 @@ class Reporter:
             "scope": self.ctx.scope.summary(),
             "store": self.store.to_dict(),
             "llm_analysis": self._llm(),
+            "llm_status": getattr(self.store, "llm_status", None),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as fh:
@@ -293,6 +294,10 @@ class Reporter:
         if summary_txt:
             lines.append("## Analyst read")
             lines.append(summary_txt)
+            llm_status = getattr(self.store, "llm_status", None)
+            if not llm and llm_status:
+                lines.append("")
+                lines.append(f"_LLM augmentation: {llm_status}._")
             lines.append("")
 
         plan = getattr(self.store, "battle_plan", None) or {}

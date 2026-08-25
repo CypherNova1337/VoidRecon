@@ -1,4 +1,4 @@
 """Single source of truth for the VoidRecon version."""
 
-__version__ = "0.5.1"
-__codename__ = "Oracle"
+__version__ = "0.6.0"
+__codename__ = "Ledger"

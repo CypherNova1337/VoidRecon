@@ -97,17 +97,25 @@ class CloudAssets(Module):
         if asset:
             asset.tags.add("cloud")
             asset.tags.add("public" if public else "private")
+            asset.tags.add("unverified-owner")  # correlate upgrades if a host points here
         if public:
+            # A bucket whose NAME merely matches the org is not proof the org owns
+            # it — name-squatting is rampant. We flag it MEDIUM and unverified;
+            # correlate() upgrades to HIGH only when a target host CNAMEs to it.
             ctx.add_finding(
-                f"Public {provider} bucket: {name}",
-                module=self.name, severity=Severity.HIGH, asset=url,
+                f"Public {provider} bucket (ownership unverified): {name}",
+                module=self.name, severity=Severity.MEDIUM, asset=url,
+                confidence=Confidence.TENTATIVE,
                 description=(
-                    f"The {provider} bucket '{name}' is publicly listable/readable. Review its "
-                    "contents for sensitive data. Do not download beyond what is needed to "
-                    "confirm exposure, and stay within program scope."
+                    f"A publicly listable {provider} bucket named '{name}' exists — but the name "
+                    "was derived from the org's identity, so it may belong to a name-squatter, "
+                    "not the target. Confirm ownership before reporting: look for a target host "
+                    "that CNAMEs to this bucket, org-specific object keys, or other provenance. "
+                    "Stay within program scope and download only what's needed to confirm."
                 ),
-                evidence={"url": url, "sample_keys": (keys or [])[:15]},
-                tags={"cloud", "exposure"},
+                evidence={"url": url, "bucket": name, "provider": provider,
+                          "ownership": "unverified", "sample_keys": (keys or [])[:15]},
+                tags={"cloud", "exposure", "unverified-owner"},
             )
 
     async def _check_s3(self, ctx: RunContext, name: str) -> bool:

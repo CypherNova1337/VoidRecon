@@ -7,6 +7,34 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.6.0] — Ledger
+
+### Fixed / added (from a hunter's field triage)
+- **Secret detection no longer cries wolf.** Placeholder values (`your_api_key`,
+  `changeme`, `xxxx…`, `<your-secret>`, `example_password`) are blocked, the generic
+  `key = "value"` match is entropy-scored on its value, and known-public identifiers
+  (Google OAuth client IDs, …) are excluded. Structural tokens padded with `xxxx`
+  are dropped too. This kills the 8-of-8 false-positive run — `find_secrets` is the
+  shared chokepoint, so GitHub dorking, JS mining, and source-map analysis all get
+  it. New `looks_like_real_secret()` / `shannon_entropy()` helpers.
+- **Cloud buckets disambiguate ownership.** A bucket whose name merely matches the
+  org is now flagged **MEDIUM, ownership-unverified** (name-squatting is common),
+  not HIGH. `correlate` then runs a **provenance check** after DNS resolution: when
+  a target host CNAMEs onto the bucket, it's upgraded to a **confirmed target-owned**
+  HIGH exposure. Squatters stay unverified.
+- **Cloudflare Access enumerator (new `cf_access` module).** For each live host it
+  detects the Zero-Trust gate (`/cdn-cgi/access/…`), decodes the login redirect's
+  public `kid` and base64 `meta` (no secrets involved), and **groups hosts by Access
+  policy (kid) and team** — mapping which hosts share one gate and flagging the
+  stray host under a different policy.
+- **Wayback delta mode.** On a repeat scan, endpoints not seen in the previous run
+  are tagged `new-since-last` and summarised as their own lead — the fresh surface
+  to test first, instead of the same thousands of URLs every time.
+- **Empty `llm_analysis` is explained.** The report now carries an `llm_status`
+  ("not enabled — run with --ai…", "no API key in $…", "ok (provider/model)") so a
+  blank LLM section is never a silent mystery; the keyless Analyst does the work
+  regardless.
+
 ## [0.5.1]
 
 ### Fixed — no module can hang the run (from the Kraken field run)

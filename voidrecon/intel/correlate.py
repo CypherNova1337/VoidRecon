@@ -43,10 +43,71 @@ _TAKEOVER_FINGERPRINTS = {
 def correlate(ctx: RunContext) -> None:
     _cluster_by_ip(ctx)
     _flag_takeover_candidates(ctx)
+    _verify_bucket_ownership(ctx)
     _dense_netblocks(ctx)
     _cluster_by_favicon(ctx)
     _cluster_by_tracker(ctx)
     _out_of_scope_leads(ctx)
+
+
+def _verify_bucket_ownership(ctx: RunContext) -> None:
+    """Provenance check for discovered cloud buckets.
+
+    A bucket whose name matches the org proves nothing — squatters register those.
+    Real ownership is shown by a *target host pointing at the bucket*: a subdomain
+    whose CNAME resolves onto the bucket's storage host. This runs after DNS
+    resolution, so CNAMEs are populated. When we find that link we upgrade the
+    bucket to a confirmed, target-owned exposure."""
+    buckets = [a for a in ctx.store.assets(kind=AssetKind.CLOUD_RESOURCE)
+               if a.attrs.get("bucket")]
+    if not buckets:
+        return
+    subs = ctx.store.assets(kind=AssetKind.SUBDOMAIN)
+
+    def points_at(bucket_name: str, provider: str) -> str | None:
+        for sub in subs:
+            cname = (sub.attrs.get("cname") or "").lower().rstrip(".")
+            if not cname:
+                continue
+            if provider == "AWS S3" and (
+                    cname.startswith(f"{bucket_name}.s3") or
+                    (bucket_name in cname and ".s3" in cname and "amazonaws" in cname)):
+                return sub.value
+            if provider == "Azure Blob" and cname.startswith(f"{bucket_name}.blob."):
+                return sub.value
+            if provider == "Google Cloud Storage" and "storage.googleapis.com" in cname and (
+                    sub.value == bucket_name or sub.value.split(".")[0] == bucket_name.split(".")[0]):
+                return sub.value
+        return None
+
+    for b in buckets:
+        name = b.attrs.get("bucket")
+        provider = b.attrs.get("provider") or "cloud"
+        host = points_at(name, provider)
+        if not host:
+            continue
+        # Confirmed the org's: a target host resolves onto this bucket.
+        b.tags.discard("unverified-owner")
+        b.tags.add("owned")
+        b.attrs["ownership"] = "confirmed"
+        b.attrs["provenance_host"] = host
+        public = "public" in b.tags
+        ctx.add_finding(
+            f"Confirmed target-owned {provider} bucket: {name}",
+            module="correlate",
+            severity=Severity.HIGH if public else Severity.MEDIUM,
+            confidence=Confidence.CONFIRMED,
+            asset=b.value,
+            description=(
+                f"The target host {host} CNAMEs onto this {provider} bucket, confirming the "
+                "org owns it (not a name-squatter). "
+                + ("It is also publicly listable — review for exposed data, in scope."
+                   if public else "Access is restricted; note it as owned infrastructure.")
+            ),
+            evidence={"url": b.value, "bucket": name, "provider": provider,
+                      "provenance_host": host, "ownership": "confirmed"},
+            tags={"cloud", "exposure", "owned"} if public else {"cloud", "owned"},
+        )
 
 
 def _cluster_by_ip(ctx: RunContext) -> None:

@@ -56,6 +56,20 @@ class LLMClient:
         key_env = cfg.get("intel.llm_api_key_env", "VOIDRECON_LLM_API_KEY")
         self.api_key = os.environ.get(key_env, "")
 
+    def disabled_reason(self) -> str | None:
+        """Why the model layer isn't producing analysis — so an empty
+        ``llm_analysis`` is explained, not a silent mystery."""
+        if not self.ctx.config.get("intel.llm_enabled", False):
+            return "not enabled — run with --ai to turn it on; the keyless Analyst ran instead"
+        if self.provider in ("none", ""):
+            return "no provider set (intel.llm_provider: openai | anthropic | ollama | openai_compatible)"
+        if self.provider in ("openai", "anthropic", "openai_compatible") and not self.api_key:
+            env = self.ctx.config.get("intel.llm_api_key_env", "VOIDRECON_LLM_API_KEY")
+            return f"no API key found in ${env}"
+        if not self.model:
+            return "no model set (intel.llm_model)"
+        return None
+
     @property
     def enabled(self) -> bool:
         if not self.ctx.config.get("intel.llm_enabled", False):

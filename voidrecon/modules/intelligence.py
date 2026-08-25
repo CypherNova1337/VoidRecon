@@ -57,9 +57,15 @@ class Intelligence(Module):
             self.log.info("requesting LLM analysis (%s / %s)", llm.provider, llm.model)
             result = await llm.analyze()
             if result:
-                ctx.store.__dict__.setdefault("_intel", {})
                 # Stash on the store for the reporter to pick up.
                 setattr(ctx.store, "llm_analysis", result)
+                setattr(ctx.store, "llm_status", f"ok ({llm.provider}/{llm.model})")
                 self.log.info("LLM analysis attached to report")
+            else:
+                setattr(ctx.store, "llm_status", "enabled but returned nothing "
+                        f"({llm.provider}/{llm.model}) — see logs; the keyless Analyst still ran")
+                self.log.warning("LLM enabled but produced no analysis")
         else:
-            self.log.debug("LLM analysis disabled or unconfigured")
+            reason = llm.disabled_reason()
+            setattr(ctx.store, "llm_status", reason)
+            self.log.debug("LLM analysis skipped: %s", reason)

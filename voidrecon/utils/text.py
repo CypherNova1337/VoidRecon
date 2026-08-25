@@ -2,26 +2,53 @@
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 
 _SLUG_RE = re.compile(r"[^a-z0-9._-]+")
 
-# High-signal secret patterns used by JS/content mining. Deliberately conservative
-# to keep false positives low; each entry is (label, compiled-regex).
-SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("aws_access_key_id", re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b")),
-    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
-    ("slack_token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,48}\b")),
-    ("github_pat", re.compile(r"\bghp_[0-9A-Za-z]{36}\b")),
-    ("github_fine_grained", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{22,255}\b")),
-    ("stripe_secret", re.compile(r"\bsk_live_[0-9A-Za-z]{24,}\b")),
-    ("private_key_block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")),
-    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+# High-signal secret patterns. The structurally-unambiguous ones (AKIA, ghp_, …)
+# are strong on their own; the generic ``key = "value"`` pattern captures the
+# value separately (group ``val``) so it can be screened for entropy/placeholders.
+# Each entry is (label, compiled-regex, structural?).
+SECRET_PATTERNS: list[tuple[str, re.Pattern, bool]] = [
+    ("aws_access_key_id", re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"), True),
+    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"), True),
+    ("slack_token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,48}\b"), True),
+    ("github_pat", re.compile(r"\bghp_[0-9A-Za-z]{36}\b"), True),
+    ("github_fine_grained", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{22,255}\b"), True),
+    ("stripe_secret", re.compile(r"\bsk_live_[0-9A-Za-z]{24,}\b"), True),
+    ("private_key_block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"), True),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), True),
     ("generic_secret_assign", re.compile(
         r"(?i)(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)"
-        r"['\"]?\s*[:=]\s*['\"][0-9A-Za-z\-_./+]{12,}['\"]"
-    )),
+        r"['\"]?\s*[:=]\s*['\"](?P<val>[0-9A-Za-z\-_./+]{8,})['\"]"
+    ), False),
 ]
+
+# Dictionary words that betray a placeholder rather than a real credential.
+_PLACEHOLDER_WORDS = {
+    "your", "yours", "my", "our", "the", "example", "sample", "test", "testing",
+    "dummy", "placeholder", "changeme", "change", "insert", "here", "todo", "fixme",
+    "redacted", "hidden", "secret", "apikey", "api", "key", "token", "value", "none",
+    "null", "nil", "foo", "bar", "baz", "abc", "somekey", "mykey", "enter", "replace",
+    "add", "put", "fill", "notreal", "fake", "demo", "default", "xxxx", "xxxxx",
+    "password", "passwd", "pass", "username", "user", "email", "goes", "string",
+}
+# Substrings/shapes that are never a live secret's value.
+_PLACEHOLDER_RE = re.compile(
+    r"(?ix)"
+    r"^[<{\[(]| [<{\[(] |[>}\])]$|"          # wrapped in <>, {}, [], ()
+    r"your[_-]?|_here\b|\bhere\b|"           # your_key, key_here
+    r"x{4,}|\*{3,}|\.{3,}|_{3,}|-{3,}|"      # xxxx, ***, ..., ____, ----
+    r"example|placeholder|changeme|redacted|dummy|sample|insert|<token>|123456"
+)
+# Public-by-design identifiers that look secret-ish but are not credentials.
+_KNOWN_PUBLIC_RE = re.compile(
+    r"(?i)\.apps\.googleusercontent\.com$|"   # Google OAuth client IDs are public
+    r"^ya29\.|^AIzaSy[A-Za-z0-9_\-]{0,4}$"    # (short/truncated google keys → noise)
+)
 
 
 def slugify(text: str, maxlen: int = 80) -> str:
@@ -30,12 +57,53 @@ def slugify(text: str, maxlen: int = 80) -> str:
     return (text or "target")[:maxlen]
 
 
+def shannon_entropy(value: str) -> float:
+    """Shannon entropy (bits/char). Real random secrets sit high (~4+); English
+    placeholders and repeated characters sit low."""
+    if not value:
+        return 0.0
+    n = len(value)
+    return -sum((c / n) * math.log2(c / n) for c in Counter(value).values())
+
+
+def looks_like_real_secret(value: str, *, min_entropy: float = 3.0) -> bool:
+    """Screen a candidate secret *value*: reject obvious placeholders, known-public
+    identifiers, low-entropy strings, and dictionary-word fillers like
+    ``your_api_key_here``."""
+    v = (value or "").strip().strip("'\"")
+    if len(v) < 8:
+        return False
+    if _PLACEHOLDER_RE.search(v) or _KNOWN_PUBLIC_RE.search(v):
+        return False
+    # If most word-tokens are dictionary/placeholder words, it's a template.
+    tokens = [t for t in re.split(r"[_\-.\s]+", v.lower()) if t]
+    if tokens and sum(1 for t in tokens if t in _PLACEHOLDER_WORDS) >= max(1, (len(tokens) + 1) // 2):
+        return False
+    if shannon_entropy(v) < min_entropy:
+        return False
+    if re.fullmatch(r"(.)\1{5,}", v):     # aaaaaaaa, 00000000
+        return False
+    return True
+
+
 def find_secrets(blob: str) -> list[tuple[str, str]]:
-    """Return ``(label, matched_snippet)`` pairs for suspected secrets in ``blob``."""
+    """Return ``(label, matched_snippet)`` pairs for suspected secrets in ``blob``.
+
+    Structural matches (AKIA…, ghp_…) still get a placeholder screen; the generic
+    ``key = "value"`` match is additionally entropy-scored on its value, so
+    ``api_key = "your_api_key_here"`` is rejected instead of flagged HIGH."""
     hits: list[tuple[str, str]] = []
-    for label, pattern in SECRET_PATTERNS:
+    for label, pattern, structural in SECRET_PATTERNS:
         for match in pattern.finditer(blob):
             snippet = match.group(0)
+            if structural:
+                # Even a real-shaped token is a template if it's padded with xxxx.
+                if _PLACEHOLDER_RE.search(snippet):
+                    continue
+            else:
+                value = match.groupdict().get("val") or snippet
+                if not looks_like_real_secret(value):
+                    continue
             if len(snippet) > 120:
                 snippet = snippet[:117] + "..."
             hits.append((label, snippet))
