@@ -56,13 +56,17 @@ class VulnHints(Module):
         categories = self._load()
         if not categories:
             return
-        from voidrecon.utils.params import worth_injecting
+        from voidrecon.utils.params import is_static_path, worth_injecting
 
         buckets: dict[str, set[str]] = {}
         seen = 0
         for asset in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(asset.value)
             if not parsed.query:
+                continue
+            # Static assets (/_next/data/*.json, *.js, *.map, …) are not injection
+            # surfaces — keep them out of the candidate files that feed dalfox/sqlmap.
+            if is_static_path(asset.value):
                 continue
             # Only real sinks: drop analytics (utm_*), OAuth-flow tokens (code,
             # state, redirect_uri…), and presentation params. This is what stops an

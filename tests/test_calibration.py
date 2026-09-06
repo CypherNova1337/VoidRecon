@@ -107,6 +107,69 @@ def test_report_caps_info_findings(tmp_path):
     assert "sevgroup" in html and "omitted here" in html
 
 
+# ---- SQLi: static paths + boolean stability -------------------------------
+def test_sqli_skips_static_and_keeps_app_paths():
+    from voidrecon.modules.vuln.sqli_probe import SqliProbe
+
+    ctx = _ctx(active=True)
+    ctx.store.add_asset(Asset(AssetKind.URL,
+                              "https://example.com/static-assets/_next/data/ABC/docs/c.json?slug=x"))
+    ctx.store.add_asset(Asset(AssetKind.URL,
+                              "https://example.com/dashboard/add-connection?serviceId=5"))
+    urls = [u for u, _, _ in SqliProbe()._targets(ctx)]
+    assert any("add-connection" in u for u in urls)
+    assert not any("_next" in u for u in urls)     # the embarrassing FP source is gone
+
+
+def test_sqli_boolean_ignores_nondeterministic_endpoint():
+    import itertools
+
+    from voidrecon.modules.vuln.sqli_probe import SqliProbe
+
+    ctx = _ctx(active=True)
+    client = ctx.http
+    counter = itertools.count()
+
+    class _R:
+        def __init__(self, n):
+            self.content = b"x" * n
+            self.text = ""
+            self.status_code = 200
+
+    async def fake_get(url, **kw):
+        # identical requests return different lengths — SPA rehydration noise
+        return _R(1000 + (next(counter) * 613) % 3000)
+
+    client.get = fake_get
+    fired = asyncio.run(SqliProbe()._probe(ctx, "https://example.com/x?id=1", "id", "1"))
+    assert fired is False    # a wobbling endpoint must not read as boolean SQLi
+
+
+def test_sqli_boolean_detects_stable_reproducible_differential():
+    from urllib.parse import parse_qs, urlparse
+
+    from voidrecon.modules.vuln.sqli_probe import SqliProbe
+
+    ctx = _ctx(active=True)
+    client = ctx.http
+
+    class _R:
+        def __init__(self, n):
+            self.content = b"x" * n
+            self.text = ""
+            self.status_code = 200
+
+    async def fake_get(url, **kw):
+        v = parse_qs(urlparse(url).query).get("id", [""])[0]
+        if "1=2" in v:            # always-false → clearly shorter, reproducibly
+            return _R(1000)
+        return _R(5000)           # baseline, quote, and always-true → full page
+
+    client.get = fake_get
+    fired = asyncio.run(SqliProbe()._probe(ctx, "https://example.com/x?id=1", "id", "1"))
+    assert fired is True
+
+
 # ---- analyst: out-of-scope host never headlines a play --------------------
 def test_analyst_excludes_out_of_scope():
     from voidrecon.core.models import ScopeState

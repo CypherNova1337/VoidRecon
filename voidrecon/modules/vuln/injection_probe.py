@@ -71,15 +71,19 @@ class InjectionProbe(Module):
         self.log.info("injection probing complete: %d candidate(s)", found)
 
     def _targets(self, ctx: RunContext):
+        from voidrecon.utils.params import is_static_path, worth_injecting
+
         out, seen = [], set()
         for a in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(a.value)
-            if not parsed.query:
+            if not parsed.query or is_static_path(a.value):
                 continue
             host = parsed.hostname
             if not host or not ctx.can_touch(host):
                 continue
             for p in parse_qs(parsed.query):
+                if not worth_injecting(p):
+                    continue
                 key = (a.value.split("?")[0], p)
                 if key not in seen:
                     seen.add(key)

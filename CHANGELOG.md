@@ -7,6 +7,27 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.8.0] — Sifter
+
+### Fixed — SQLi false positives on static assets (from the v0.7.0 fivetran re-review)
+The one embarrassing lead left after 0.7.0: boolean-based SQLi "candidates" on
+Next.js ``/_next/data/*.json`` static files. Those have no database behind them —
+the byte-count differences were SPA-rehydration noise, not injection.
+
+- **Static-asset paths are never injection-probed.** New `utils.params.is_static_path`
+  excludes framework data dirs (`/_next/`, `/_nuxt/`, `/static/`, `/assets/`, …) and
+  static extensions (`.js`, `.css`, `.map`, `.json`, fonts, images, media) from
+  `sqli_probe`, `injection_probe`, `open_redirect`, `ssrf_probe`, and the candidate
+  classifier (`vuln_hints`) — so they never reach the candidate files either.
+- **Boolean SQLi now requires a *reproducible* differential.** The endpoint's
+  baseline must be deterministic across repeats (a wobbling SPA is skipped), each
+  payload's response must be self-consistent across repeats, and only then does a
+  true≈baseline / false-clearly-different pattern — comfortably above the measured
+  noise floor — count. A one-off length diff is no longer SQLi.
+- **Net effect:** with static-asset SQLi gone, real app-surface candidates (e.g. a
+  `serviceId` parameter on an app route) rank at the top of the plan where they
+  belong, instead of behind dead static-file leads.
+
 ## [0.7.0] — Calibre
 
 ### Severity calibration + false-positive gates (from the fivetran.com field review)

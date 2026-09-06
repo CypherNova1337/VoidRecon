@@ -66,12 +66,16 @@ class SqliProbe(Module):
         self.log.info("SQLi probing complete: %d candidate(s)", found)
 
     def _targets(self, ctx: RunContext):
-        from voidrecon.utils.params import worth_injecting
+        from voidrecon.utils.params import is_static_path, worth_injecting
 
         out, seen = [], set()
         for a in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(a.value)
             if not parsed.query:
+                continue
+            # Static assets (/_next/data/*.json, *.js, *.map, …) have no database
+            # behind them — probing them only manufactures FPs off SPA rehydration.
+            if is_static_path(a.value):
                 continue
             host = parsed.hostname
             if not host or not ctx.can_touch(host):
@@ -98,7 +102,6 @@ class SqliProbe(Module):
         base = await ctx.http.get(self._mutate(url, param, value))
         if base is None:
             return False
-        base_len = len(base.content)
         base_low = base.text.lower()
 
         # Error-based: a DB error must appear ONLY after injecting a quote. If the
@@ -111,19 +114,51 @@ class SqliProbe(Module):
                 self._report(ctx, url, param, "error-based",
                              {"signature": sig, "differential": True})
                 return True
+        # Boolean-based, but only on a *stable* endpoint. SPA pages (Next.js data,
+        # client-rehydrated apps) return different byte counts on identical requests;
+        # a naive true/false length diff there is pure noise. So: (1) confirm the
+        # baseline is reproducible, (2) require true≈baseline AND false clearly
+        # different, (3) require that pattern to repeat — a one-off diff isn't SQLi.
+        base_samples = await self._sample_lens(ctx, url, param, value, n=3)
+        if base_samples is None:
+            return False
+        base_len = sum(base_samples) / len(base_samples)
+        noise = max(256, base_len * 0.06)
+        if (max(base_samples) - min(base_samples)) > noise:
+            self.log.debug("sqli: %s?%s endpoint is non-deterministic — skipping boolean", url, param)
+            return False
+
         for true_p, false_p in ((f"{value} AND 1=1", f"{value} AND 1=2"),
                                 (f"{value}' AND '1'='1", f"{value}' AND '1'='2")):
-            t = await ctx.http.get(self._mutate(url, param, true_p))
-            f = await ctx.http.get(self._mutate(url, param, false_p))
-            if t is None or f is None:
+            t_lens = await self._sample_lens(ctx, url, param, true_p, n=2)
+            f_lens = await self._sample_lens(ctx, url, param, false_p, n=2)
+            if t_lens is None or f_lens is None:
                 continue
-            tl, fl = len(t.content), len(f.content)
-            # True ~ baseline, False clearly different → boolean SQLi.
-            if abs(tl - base_len) <= max(64, base_len * 0.02) and abs(tl - fl) > max(128, base_len * 0.1):
+            # Each payload must itself be reproducible (self-consistent lengths).
+            if (max(t_lens) - min(t_lens)) > noise or (max(f_lens) - min(f_lens)) > noise:
+                continue
+            tl = sum(t_lens) / len(t_lens)
+            fl = sum(f_lens) / len(f_lens)
+            # True tracks the baseline, False departs from it by well over the noise
+            # floor, and (implicitly) both were stable across repeats.
+            if abs(tl - base_len) <= noise and abs(tl - fl) > max(512, base_len * 0.15):
                 self._report(ctx, url, param, "boolean-based",
-                             {"baseline": base_len, "true_len": tl, "false_len": fl})
+                             {"baseline": round(base_len), "true_len": round(tl),
+                              "false_len": round(fl), "reproduced": True})
                 return True
         return False
+
+    async def _sample_lens(self, ctx: RunContext, url: str, param: str, value: str,
+                           n: int = 2) -> list[int] | None:
+        """Content lengths for the same request repeated ``n`` times, or None if any
+        request fails. Lets the caller tell a stable endpoint from a noisy SPA."""
+        lens: list[int] = []
+        for _ in range(n):
+            r = await ctx.http.get(self._mutate(url, param, value))
+            if r is None:
+                return None
+            lens.append(len(r.content))
+        return lens
 
     def _report(self, ctx, url, param, technique, evidence):
         from voidrecon.utils.text import short_url

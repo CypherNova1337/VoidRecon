@@ -63,10 +63,12 @@ class OpenRedirect(Module):
 
     def _targets(self, ctx: RunContext):
         """Return (url, param) pairs worth testing."""
+        from voidrecon.utils.params import is_static_path
+
         out, seen = [], set()
         for a in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(a.value)
-            if not parsed.query:
+            if not parsed.query or is_static_path(a.value):
                 continue
             host = parsed.hostname
             if not host or not ctx.can_touch(host):

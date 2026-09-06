@@ -57,3 +57,36 @@ def is_benign_param(name: str) -> bool:
 def worth_injecting(name: str) -> bool:
     """Whether a parameter is worth spending an active injection probe on."""
     return bool(name) and not is_benign_param(name)
+
+
+# Path markers and extensions that mean "this is a static asset, not a
+# database-backed endpoint." Framework data files (Next.js ``/_next/data/…json``,
+# Nuxt ``/_nuxt/``) are the worst offenders: they respond to any query but have no
+# DB behind them, and SPA rehydration makes their byte-length wobble between
+# identical requests — which is exactly what naive boolean-SQLi detection misreads.
+_STATIC_MARKERS = (
+    "/_next/", "/_nuxt/", "/static/", "/static-assets", "/assets/", "/dist/",
+    "/build/", "/_astro/", "/cdn-cgi/", "/wp-content/", "/wp-includes/",
+)
+_STATIC_EXTS = (
+    ".js", ".mjs", ".cjs", ".css", ".map", ".json", ".xml", ".txt", ".woff",
+    ".woff2", ".ttf", ".eot", ".otf", ".svg", ".png", ".jpg", ".jpeg", ".gif",
+    ".ico", ".webp", ".avif", ".bmp", ".mp4", ".webm", ".mov", ".mp3", ".pdf",
+    ".wasm",
+)
+
+
+def is_static_path(url_or_path: str) -> bool:
+    """True if the URL/path points at a static asset (no server-side DB logic),
+    so injection probing there is pure noise."""
+    from urllib.parse import urlsplit
+
+    try:
+        path = urlsplit(url_or_path).path.lower()
+    except Exception:
+        path = (url_or_path or "").split("?", 1)[0].lower()
+    if not path:
+        return False
+    if any(m in path for m in _STATIC_MARKERS):
+        return True
+    return path.endswith(_STATIC_EXTS)
