@@ -66,6 +66,8 @@ class SqliProbe(Module):
         self.log.info("SQLi probing complete: %d candidate(s)", found)
 
     def _targets(self, ctx: RunContext):
+        from voidrecon.utils.params import worth_injecting
+
         out, seen = [], set()
         for a in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(a.value)
@@ -75,6 +77,10 @@ class SqliProbe(Module):
             if not host or not ctx.can_touch(host):
                 continue
             for p, vals in parse_qs(parsed.query).items():
+                # Analytics/OAuth/presentation params are not SQL sinks — don't
+                # waste a probe or risk a false positive on them (e.g. utm_source).
+                if not worth_injecting(p):
+                    continue
                 key = (a.value.split("?")[0], p)
                 if key not in seen:
                     seen.add(key)
@@ -88,18 +94,23 @@ class SqliProbe(Module):
         return urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
 
     async def _probe(self, ctx: RunContext, url: str, param: str, value: str) -> bool:
-        # Error-based.
-        err_resp = await ctx.http.get(self._mutate(url, param, value + "'"))
-        if err_resp is not None:
-            sig = sql_error(err_resp.text)
-            if sig:
-                self._report(ctx, url, param, "error-based", {"signature": sig})
-                return True
-        # Boolean-based (numeric + string contexts).
+        # Baseline first — needed to prove any signal is *injection-induced*.
         base = await ctx.http.get(self._mutate(url, param, value))
         if base is None:
             return False
         base_len = len(base.content)
+        base_low = base.text.lower()
+
+        # Error-based: a DB error must appear ONLY after injecting a quote. If the
+        # signature is already in the baseline it's page content (a data company's
+        # marketing page mentions "PostgreSQL"/"Oracle error"), not an injection.
+        err_resp = await ctx.http.get(self._mutate(url, param, value + "'"))
+        if err_resp is not None:
+            sig = sql_error(err_resp.text)
+            if sig and sig not in base_low:      # differential: new, injection-induced
+                self._report(ctx, url, param, "error-based",
+                             {"signature": sig, "differential": True})
+                return True
         for true_p, false_p in ((f"{value} AND 1=1", f"{value} AND 1=2"),
                                 (f"{value}' AND '1'='1", f"{value}' AND '1'='2")):
             t = await ctx.http.get(self._mutate(url, param, true_p))

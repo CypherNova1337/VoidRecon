@@ -56,13 +56,18 @@ class VulnHints(Module):
         categories = self._load()
         if not categories:
             return
+        from voidrecon.utils.params import worth_injecting
+
         buckets: dict[str, set[str]] = {}
         seen = 0
         for asset in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
             parsed = urlparse(asset.value)
             if not parsed.query:
                 continue
-            params = set(parse_qs(parsed.query).keys())
+            # Only real sinks: drop analytics (utm_*), OAuth-flow tokens (code,
+            # state, redirect_uri…), and presentation params. This is what stops an
+            # OAuth return URL becoming an "RCE candidate" and utm_* becoming SQLi.
+            params = {p for p in parse_qs(parsed.query) if worth_injecting(p)}
             if not params:
                 continue
             seen += 1
@@ -74,15 +79,17 @@ class VulnHints(Module):
                     buckets.setdefault(cat, set()).add(asset.value)
 
         for cat, urls in buckets.items():
-            spec = categories.get(cat, {})
+            # These are name-based *leads* that feed the candidate files — never a
+            # confirmed vuln, so they cap at LOW regardless of the class's gf weight.
             ctx.add_finding(
                 f"{len(urls)} {cat.upper()} candidate endpoint(s)",
-                module=self.name, severity=_SEV.get(spec.get("severity", "low"), Severity.LOW),
+                module=self.name, severity=Severity.LOW,
                 confidence=Confidence.TENTATIVE,
                 description=(f"Endpoints carrying parameters commonly associated with {cat.upper()}. "
-                             "Prioritised testing leads — not confirmed vulnerabilities."),
+                             "Prioritised testing leads — not confirmed vulnerabilities. Feed them to "
+                             "the matching tool (candidates/*.txt)."),
                 evidence={"category": cat, "urls": sorted(urls)[:60], "count": len(urls)},
-                tags={"vuln-hint", cat},
+                tags={"vuln-hint", f"{cat}-candidate"},
             )
         if buckets:
             self.log.info("classified %d parameterised URLs into %d vuln buckets", seen, len(buckets))

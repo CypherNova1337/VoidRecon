@@ -54,6 +54,23 @@ _RULES = [
 ]
 
 
+def _prune_command(command: str | None, done: set[str]) -> str | None:
+    """Drop modules that already ran from an ``--only a,b,c`` command.
+
+    If every named module is already complete, the command is pointless — return
+    None so the recommendation shows without a stale 're-run this' line."""
+    if not command or "--only" not in command or not done:
+        return command
+    parts = command.split("--only", 1)
+    head, rest = parts[0], parts[1].strip()
+    mods_str = rest.split()[0] if rest else ""
+    tail = rest[len(mods_str):]
+    remaining = [m for m in mods_str.split(",") if m and m not in done]
+    if not remaining:
+        return None
+    return f"{head}--only {','.join(remaining)}{tail}".rstrip()
+
+
 def summarize(ctx) -> str:
     """A generated, key-free natural-language read of the engagement.
 
@@ -76,6 +93,7 @@ def recommend(ctx, limit: int = 12) -> list[dict]:
                 tags_present[tag].append(f.asset)
 
     seed = ctx.scope.seeds[0] if ctx.scope.seeds else "target"
+    done = set(getattr(store, "completed_modules", set()) or set())
     recs: list[dict] = []
     for rank, tag, action, why, cmd in _RULES:
         assets = tags_present.get(tag)
@@ -87,7 +105,8 @@ def recommend(ctx, limit: int = 12) -> list[dict]:
             "action": action,
             "why": why,
             "targets": uniq,
-            "command": cmd.format(seed=seed) if cmd else None,
+            # Don't tell the operator to run modules that already ran this session.
+            "command": _prune_command(cmd.format(seed=seed), done) if cmd else None,
         })
 
     # Always include a "review the top surface" recommendation.

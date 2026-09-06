@@ -133,30 +133,57 @@ def _cluster_by_ip(ctx: RunContext) -> None:
 
 
 def _flag_takeover_candidates(ctx: RunContext) -> None:
+    """Flag CNAME-to-provider hosts as takeover *candidates* only.
+
+    A CNAME to a SaaS/cloud provider is not a takeover — most point at live,
+    claimed resources. Only ``takeover_verify`` (which matches the provider's
+    "unclaimed resource" fingerprint over HTTP) may promote a candidate to a
+    confirmed ``takeover``. Here we distinguish two verdicts so the report never
+    calls a live host "claimable":
+
+    * **dangling** — the name does not resolve (record absent): a real lead.
+    * **live** — it resolves to provider infra: probably claimed; verify only.
+    """
     for asset in ctx.store.assets(kind=AssetKind.SUBDOMAIN):
+        if asset.attrs.get("takeover_confirmed"):
+            continue  # takeover_verify already confirmed this one
         cname = (asset.attrs.get("cname") or "").lower().rstrip(".")
         if not cname:
             continue
         for fp, provider in _TAKEOVER_FINGERPRINTS.items():
             if cname.endswith(fp):
                 resolves = bool(asset.attrs.get("resolved_ips"))
-                asset.attrs["takeover_candidate"] = True
-                ctx.add_finding(
-                    f"Potential subdomain takeover: {asset.value} -> {provider}",
-                    module="correlate",
-                    severity=Severity.HIGH if not resolves else Severity.MEDIUM,
-                    confidence=Confidence.TENTATIVE,
-                    asset=asset.value,
-                    description=(
-                        f"CNAME points to {provider} ({cname}). If the backing resource "
-                        "is unclaimed the subdomain may be takeoverable. Verify the "
-                        "provider's claim status before reporting — do not register "
-                        "third-party resources without authorization."
-                    ),
-                    evidence={"cname": cname, "provider": provider, "resolves": resolves},
-                    references=["https://github.com/EdOverflow/can-i-take-over-xyz"],
-                    tags={"takeover"},
-                )
+                asset.attrs["takeover_lead"] = provider   # NOT takeover_confirmed
+                if resolves:
+                    ctx.add_finding(
+                        f"CNAME to {provider} (live — verify claim status, not obviously dangling): {asset.value}",
+                        module="correlate", severity=Severity.INFO, confidence=Confidence.TENTATIVE,
+                        asset=asset.value,
+                        description=(
+                            f"{asset.value} CNAMEs to {provider} ({cname}) and resolves to live "
+                            "infrastructure — the resource is most likely claimed. This is a lead to "
+                            "verify, not a takeover; check the provider's claim status before reporting."
+                        ),
+                        evidence={"cname": cname, "provider": provider, "resolves": True,
+                                  "verdict": "live-verify"},
+                        tags={"takeover-candidate"},
+                    )
+                else:
+                    ctx.add_finding(
+                        f"Dangling CNAME to {provider} (takeover candidate): {asset.value}",
+                        module="correlate", severity=Severity.MEDIUM, confidence=Confidence.TENTATIVE,
+                        asset=asset.value,
+                        description=(
+                            f"{asset.value} CNAMEs to {provider} ({cname}) but the name does not resolve "
+                            "(record absent) — a classic dangling-record takeover candidate. Confirm the "
+                            "backing resource is unclaimed (takeover_verify checks the provider fingerprint) "
+                            "before reporting; do not register third-party resources without authorization."
+                        ),
+                        evidence={"cname": cname, "provider": provider, "resolves": False,
+                                  "verdict": "dangling"},
+                        references=["https://github.com/EdOverflow/can-i-take-over-xyz"],
+                        tags={"takeover-candidate", "dangling"},
+                    )
                 break
 
 

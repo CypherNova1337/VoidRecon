@@ -86,13 +86,16 @@ def looks_like_real_secret(value: str, *, min_entropy: float = 3.0) -> bool:
     return True
 
 
-def find_secrets(blob: str) -> list[tuple[str, str]]:
-    """Return ``(label, matched_snippet)`` pairs for suspected secrets in ``blob``.
+def find_secrets_classified(blob: str) -> list[tuple[str, str, bool]]:
+    """Like :func:`find_secrets` but each hit carries a confidence flag:
+    ``(label, snippet, high_confidence)``.
 
-    Structural matches (AKIA…, ghp_…) still get a placeholder screen; the generic
-    ``key = "value"`` match is additionally entropy-scored on its value, so
-    ``api_key = "your_api_key_here"`` is rejected instead of flagged HIGH."""
-    hits: list[tuple[str, str]] = []
+    ``high_confidence`` is True only for structurally-unambiguous vendor tokens
+    (AKIA…, AIza…, ghp_…, sk_live_…, a private-key block, a JWT). The generic
+    ``key = "value"`` match is *low* confidence even after entropy screening —
+    minified bundles are full of high-entropy strings that are not credentials —
+    so callers must not escalate it to HIGH or feed it into attack reasoning."""
+    hits: list[tuple[str, str, bool]] = []
     for label, pattern, structural in SECRET_PATTERNS:
         for match in pattern.finditer(blob):
             snippet = match.group(0)
@@ -106,8 +109,17 @@ def find_secrets(blob: str) -> list[tuple[str, str]]:
                     continue
             if len(snippet) > 120:
                 snippet = snippet[:117] + "..."
-            hits.append((label, snippet))
+            hits.append((label, snippet, structural))
     return hits
+
+
+def find_secrets(blob: str) -> list[tuple[str, str]]:
+    """Return ``(label, matched_snippet)`` pairs for suspected secrets in ``blob``.
+
+    Structural matches (AKIA…, ghp_…) still get a placeholder screen; the generic
+    ``key = "value"`` match is additionally entropy-scored on its value, so
+    ``api_key = "your_api_key_here"`` is rejected instead of flagged HIGH."""
+    return [(label, snippet) for label, snippet, _ in find_secrets_classified(blob)]
 
 
 def truncate(text: str, limit: int = 200) -> str:

@@ -19,7 +19,7 @@ import asyncio
 from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
-from voidrecon.utils.text import find_secrets, truncate
+from voidrecon.utils.text import find_secrets_classified, truncate
 
 # Query fragments appended to the target term. Kept high-signal and conservative.
 _DORKS = [
@@ -92,10 +92,12 @@ class GithubDork(Module):
             secret_dorks = {d for d in rec["dorks"] if d and d != "password"}
             if not secret_dorks:
                 continue
-            # What was actually found: scan the matched code fragments for real secrets.
+            # What was actually found: only structurally-confirmed vendor tokens
+            # count as "live secrets" — a generic high-entropy match in a fragment
+            # is not enough to call HIGH.
             real_secrets = []
             for frag in rec["fragments"]:
-                real_secrets.extend(label for label, _ in find_secrets(frag))
+                real_secrets.extend(label for label, _, hi in find_secrets_classified(frag) if hi)
             real_secrets = sorted(set(real_secrets))
             # Ownership: only the repo *owner* matching the org counts — a community
             # repo merely named "hytale-*" does NOT belong to the target.
@@ -123,9 +125,12 @@ class GithubDork(Module):
                 tags={"github", "leak-candidate"} | ({"secret"} if real_secrets else set()),
             )
         if repos:
+            with_secrets = sum(
+                1 for r in repos.values()
+                if any(hi for fr in r["fragments"] for _, _, hi in find_secrets_classified(fr))
+            )
             self.log.info("github: %d repo(s) mention %s (%d flagged, %d with live secrets)",
-                          len(repos), apex, flagged,
-                          sum(1 for r in repos.values() if any(find_secrets(fr) for fr in r["fragments"])))
+                          len(repos), apex, flagged, with_secrets)
 
     @staticmethod
     def _is_noise(full: str, repo: dict) -> bool:

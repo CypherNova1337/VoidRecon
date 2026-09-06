@@ -66,9 +66,13 @@ def score_asset(asset: Asset) -> tuple[float, list[str]]:
 
     # Enrichment-driven signals ------------------------------------------------
     attrs = asset.attrs
-    if attrs.get("takeover_candidate"):
+    if attrs.get("takeover_confirmed"):
         score += 30
-        reasons.append("dangling/takeover(+30)")
+        reasons.append("takeover_confirmed(+30)")
+    elif attrs.get("takeover_lead"):
+        # A CNAME-to-provider lead is weak until the fingerprint confirms it.
+        score += 6
+        reasons.append("takeover_lead(+6)")
     ports = attrs.get("open_ports") or []
     if ports:
         interesting = {21, 22, 23, 445, 1433, 2375, 3306, 3389, 5432, 5601, 6379, 8080, 8443, 9000, 9200, 27017}

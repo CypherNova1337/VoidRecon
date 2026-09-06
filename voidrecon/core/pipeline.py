@@ -103,6 +103,9 @@ class Pipeline:
         status = "ok"
         if self.monitor is not None:
             self.monitor.start_module(mod.name)
+        # Expose what's already done so late-phase modules (the Analyst/advisor)
+        # don't recommend re-running completed work.
+        setattr(self.ctx.store, "completed_modules", set(self.completed))
         budget = self._module_budget(mod)
         try:
             log.info("running [bold]%s[/] — %s", mod.name, mod.description or "")

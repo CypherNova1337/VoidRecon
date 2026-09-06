@@ -73,26 +73,63 @@ class ApiDiscovery(Module):
             resp = await ctx.http.get(url)
             if resp is None or resp.status_code >= 400:
                 continue
-            body = resp.text[:5000]
-            is_spec = any(k in body for k in ('"swagger"', '"openapi"', '"paths"')) or path.endswith((".json", ".yaml"))
-            ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
-                          confidence=Confidence.CONFIRMED, kind_hint="api_spec")
-            found += 1
+            ctype = (resp.headers.get("content-type") or "").lower()
+            body = resp.text[:8000]
+            low = body.lower()
+
             if path.endswith("security.txt"):
-                ctx.add_finding(f"security.txt published on {origin}", module=self.name,
-                                severity=Severity.INFO, asset=origin,
-                                description="A security.txt contact policy is published.",
-                                evidence={"url": url}, tags={"well-known"})
-            elif is_spec:
-                ctx.add_finding(f"Exposed API specification: {url}", module=self.name,
-                                severity=Severity.MEDIUM, confidence=Confidence.CONFIRMED, asset=origin,
-                                description="An API spec is publicly reachable — it maps the full API surface for testing.",
-                                evidence={"url": url}, tags={"api", "swagger"})
+                # A real security.txt is text with a Contact:/policy line — not the
+                # SPA's HTML shell answering 200 for everything.
+                if "contact:" in low or "-----begin pgp" in low or "policy:" in low:
+                    ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
+                                  confidence=Confidence.CONFIRMED, kind_hint="well_known")
+                    found += 1
+                    ctx.add_finding(f"security.txt published on {origin}", module=self.name,
+                                    severity=Severity.INFO, asset=origin,
+                                    description="A security.txt contact policy is published.",
+                                    evidence={"url": url}, tags={"well-known"})
+                continue
+
+            if path.endswith(".json") or "api-docs" in path or path.endswith("openid-configuration"):
+                # Must be actual JSON with spec markers — a 200 text/html here is
+                # the app's catch-all route, NOT an exposed spec.
+                if "json" not in ctype:
+                    continue
+                try:
+                    data = resp.json()
+                except Exception:
+                    continue
+                if not (isinstance(data, dict) and
+                        any(k in data for k in ("swagger", "openapi", "paths", "issuer"))):
+                    continue
+            elif path.endswith((".yaml", ".yml")):
+                if not ("yaml" in ctype or low.lstrip().startswith(("openapi:", "swagger:"))):
+                    continue
+                if not any(m in low for m in ("openapi:", "swagger:", "paths:")):
+                    continue
             else:
+                # Doc UI paths (/swagger-ui.html, /docs/, /redoc): confirm the page
+                # actually is an API-doc UI, not just any 200.
+                if not any(m in low for m in ("swagger", "redoc", "openapi", "swagger-ui", "api documentation")):
+                    continue
+                ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
+                              confidence=Confidence.CONFIRMED, kind_hint="api_docs")
+                found += 1
                 ctx.add_finding(f"Exposed API docs UI: {url}", module=self.name,
                                 severity=Severity.LOW, asset=origin,
                                 description="An interactive API documentation UI is publicly reachable.",
                                 evidence={"url": url}, tags={"api", "docs"})
+                continue
+
+            # Confirmed machine-readable spec.
+            ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
+                          confidence=Confidence.CONFIRMED, kind_hint="api_spec")
+            found += 1
+            ctx.add_finding(f"Exposed API specification: {url}", module=self.name,
+                            severity=Severity.MEDIUM, confidence=Confidence.CONFIRMED, asset=origin,
+                            description="A machine-readable API spec is publicly reachable — it maps the "
+                                        "full API surface for testing.",
+                            evidence={"url": url, "content_type": ctype}, tags={"api", "swagger"})
 
         for path in _GRAPHQL_PATHS:
             url = origin + path

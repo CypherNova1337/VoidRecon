@@ -15,7 +15,7 @@ starting from a flat asset list.
 
 from __future__ import annotations
 
-from voidrecon.core.models import AssetKind
+from voidrecon.core.models import AssetKind, ScopeState
 from voidrecon.intel.scoring import _findings_by_asset, top_assets
 from voidrecon.utils.text import truncate
 
@@ -93,8 +93,8 @@ def _signals(asset, findings) -> set[str]:
         sig.add("auth-gate")
     if asset.attrs.get("secrets_found"):
         sig.add("secret")
-    if asset.attrs.get("takeover_candidate"):
-        sig.add("takeover")
+    if asset.attrs.get("takeover_confirmed"):
+        sig.add("takeover")            # only a fingerprint-confirmed takeover seeds the play
     if asset.attrs.get("origin_ip") or asset.attrs.get("waf_bypass"):
         sig.add("waf-bypass")
     return sig
@@ -151,14 +151,20 @@ def _dossier(asset, findings) -> dict:
             parts.append(f", top: [{top_finding.severity.value.upper()}] "
                          f"{truncate(top_finding.title, 80)}")
     parts.append(".")
+    # Non-prod hosts are often excluded from a program's scope even under a
+    # wildcard — nudge the operator to check before spending time on them.
+    if {"staging", "dev", "test", "uat"} & signals:
+        parts.append(" ⚠ non-prod host — confirm it's in your program's scope.")
     if chains:
         parts.append(f" Play → {chains[0]['how']}")
     brief = "".join(parts)
 
+    scope = getattr(asset.scope_state, "value", "unknown")
     return {
         "asset": asset.value,
         "kind": asset.kind.value,
         "score": round(asset.score, 2),
+        "scope": scope,
         "signals": sorted(signals),
         "severities": sevs,
         "findings": [
@@ -209,6 +215,9 @@ def analyze(ctx, limit: int = 10) -> dict:
 
     dossiers: list[dict] = []
     for key, asset in candidates.items():
+        # Never headline a play on a host the scope engine says is out of bounds.
+        if getattr(asset, "scope_state", None) == ScopeState.OUT_OF_SCOPE:
+            continue
         findings = idx.get(asset.value.lower(), []) or idx.get(key, [])
         d = _dossier(asset, findings)
         if d["worth"]:

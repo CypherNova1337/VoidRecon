@@ -7,6 +7,46 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.7.0] — Calibre
+
+### Severity calibration + false-positive gates (from the fivetran.com field review)
+The tool was over-claiming: weak evidence read as HIGH and fed the attack plans.
+This release makes evidence earn its severity.
+
+- **Secrets require classification.** A structurally-valid vendor token
+  (AKIA/AIza/ghp_/sk_live/JWT/private key) is HIGH; a generic `key="value"` match
+  in a minified bundle is now INFO "high-entropy candidate" and **never seeds an
+  attack play** (no `secrets_found`, no `secret` tag). Applied to JS mining, source
+  maps, and GitHub dorking. Kills the empty-`secret_types`-but-HIGH class.
+- **Non-200 on a sensitive path is not exposure.** `.git/HEAD → 403`, `.env → 401`
+  are INFO "present but access-controlled" (the control working), not MEDIUM
+  "exposed". A 200 that returns HTML on a non-HTML path is flagged as a likely SPA
+  catch-all, not a leak. Only a 200 with real content is an exposure.
+- **SQLi is differential.** Error-based detection now requires a DB-error string
+  that appears **only after** injecting a quote (a data company's marketing page
+  mentioning "PostgreSQL" no longer trips it), and analytics/OAuth params
+  (`utm_*`, `code`, `state`, …) are never probed.
+- **Spec detection requires a real spec.** `/swagger.json` etc. must return JSON
+  (by content-type) that parses and carries spec markers; doc UIs must actually
+  reference swagger/redoc — SPA catch-alls are no longer "exposed specs".
+- **Candidate classifier gained URL-param semantics.** OAuth-return, analytics, and
+  presentation params are excluded before bucketing, so OAuth `code`/`redirect_uri`
+  stop becoming RCE/SSRF candidates and `utm_*` stops becoming SQLi. Candidate
+  findings cap at LOW (they're leads).
+- **Takeover distinguishes lead from confirmed.** A CNAME to a live provider is a
+  *candidate* (INFO/MEDIUM), not a HIGH takeover; only `takeover_verify`'s
+  unclaimed-resource fingerprint confirms one and seeds the takeover play. Dangling
+  (non-resolving) vs live verdicts are now distinct and consistent.
+- **The Analyst is scope- and status-aware.** Out-of-scope hosts never headline a
+  play; non-prod (staging/dev/test) hosts carry a "confirm program scope" nudge;
+  and because gated paths no longer carry `exposure`, a 401/403 can't seed a
+  credential-recovery chain.
+- **Next-steps respect the checkpoint.** Recommendations no longer tell you to run
+  modules that already completed this session.
+- **Report is navigable, not a dump.** Dossiers and the attack plan come first;
+  findings are grouped and collapsed by severity (Critical/High open, the tail
+  collapsed and capped) with the full set in `voidrecon.json`.
+
 ## [0.6.0] — Ledger
 
 ### Fixed / added (from a hunter's field triage)

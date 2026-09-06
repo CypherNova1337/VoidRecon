@@ -128,15 +128,50 @@ class Fuzz(Module):
                 ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
                               confidence=Confidence.CONFIRMED, status=resp.status_code)
                 found += 1
-                if sensitive and resp.status_code in (200, 201, 301, 302, 401, 403):
-                    sev = Severity.HIGH if resp.status_code in (200, 201) else Severity.MEDIUM
-                    ctx.add_finding(
-                        f"Sensitive path exposed: {url} ({resp.status_code})",
-                        module=self.name, severity=sev, confidence=Confidence.CONFIRMED, asset=origin,
-                        description="A high-value path (config/secret/backup/admin) responded — review immediately.",
-                        evidence={"url": url, "status": resp.status_code, "length": length},
-                        tags={"content-discovery", "exposure"},
-                    )
+                if sensitive:
+                    ctype = (resp.headers.get("content-type") or "").lower()
+                    self._flag_sensitive(ctx, origin, url, resp.status_code, length, ctype)
 
         await asyncio.gather(*(probe(p) for p in words))
         return found
+
+    def _flag_sensitive(self, ctx, origin, url, status, length, ctype):
+        """A sensitive path is only *exposed* when it actually serves its content.
+
+        A 401/403 means it exists but is access-controlled — that's the control
+        working, not a leak. A redirect is a gate, not an exposure. And a 200 that
+        returns HTML on a path like ``.env`` is almost always a SPA catch-all, not
+        the real file. Only a 200 with non-HTML content is treated as exposure."""
+        html_catchall = status in (200, 201) and "text/html" in ctype
+        if status in (200, 201) and not html_catchall:
+            ctx.add_finding(
+                f"Sensitive path exposed: {url} ({status})",
+                module=self.name, severity=Severity.HIGH, confidence=Confidence.CONFIRMED,
+                asset=origin,
+                description="A high-value path (config/secret/backup/admin) served content — "
+                            "review immediately and confirm what it exposes.",
+                evidence={"url": url, "status": status, "length": length, "content_type": ctype},
+                tags={"content-discovery", "exposure"},
+            )
+        elif status in (401, 403):
+            ctx.add_finding(
+                f"Sensitive path present but access-controlled: {url} ({status})",
+                module=self.name, severity=Severity.INFO, confidence=Confidence.CONFIRMED,
+                asset=origin,
+                description="A high-value path exists but is gated (401/403). Not an exposure — "
+                            "the access control is working. Noted as recon signal only.",
+                evidence={"url": url, "status": status},
+                tags={"content-discovery", "access-controlled"},
+            )
+        elif html_catchall:
+            ctx.add_finding(
+                f"Sensitive path returns HTML (likely SPA catch-all, not exposed): {url}",
+                module=self.name, severity=Severity.INFO, confidence=Confidence.TENTATIVE,
+                asset=origin,
+                description="A 200 with an HTML body on a non-HTML path is almost always the app's "
+                            "catch-all route, not the real file. Confirm the content-type before "
+                            "treating it as exposure.",
+                evidence={"url": url, "status": status, "content_type": ctype},
+                tags={"content-discovery"},
+            )
+        # redirects / 405 / 500 on a sensitive path are not exposures — not flagged.

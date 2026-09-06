@@ -18,7 +18,7 @@ from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
 from voidrecon.utils import net
-from voidrecon.utils.text import find_secrets
+from voidrecon.utils.text import find_secrets_classified
 
 _SM_URL_RE = re.compile(r"//[#@]\s*sourceMappingURL=([^\s'\"]+)")
 
@@ -81,20 +81,21 @@ class SourceMaps(Module):
             if clean and not clean.startswith(("node_modules", "..")):
                 ctx.add_asset(AssetKind.ENDPOINT, f"{urlparse(map_url).scheme}://{host}/{clean.lstrip('/')}",
                               source=self.name, confidence=Confidence.TENTATIVE, from_sourcemap=map_url)
-        # Mine the recovered source for secrets.
-        secrets = []
+        # Mine the recovered source for secrets — only a classified vendor token
+        # elevates the (real, confirmed) source-map exposure to HIGH.
+        confirmed = []
         for blob in contents:
             if isinstance(blob, str):
-                secrets.extend(find_secrets(blob))
-        sev = Severity.HIGH if secrets else Severity.MEDIUM
+                confirmed.extend(label for label, _, hi in find_secrets_classified(blob) if hi)
+        confirmed = sorted(set(confirmed))
+        sev = Severity.HIGH if confirmed else Severity.MEDIUM
         ctx.add_finding(
             f"Exposed source map: {map_url}",
             module=self.name, severity=sev, confidence=Confidence.CONFIRMED, asset=host,
             description=("A JavaScript source map is publicly reachable, disclosing original source "
                          "(file structure, internal paths"
-                         + (", and secret-like strings" if secrets else "") + "). Review it."),
-            evidence={"map": map_url, "source_files": len(sources),
-                      "secret_types": sorted({s[0] for s in secrets})[:10]},
-            tags={"sourcemap", "exposure"},
+                         + (", and a confirmed credential" if confirmed else "") + "). Review it."),
+            evidence={"map": map_url, "source_files": len(sources), "secret_types": confirmed[:10]},
+            tags={"sourcemap", "exposure"} | ({"secret"} if confirmed else set()),
         )
         return 1

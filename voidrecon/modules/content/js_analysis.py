@@ -19,7 +19,7 @@ from voidrecon.core.context import RunContext
 from voidrecon.core.models import AssetKind, Confidence, Severity
 from voidrecon.core.module import Module, Phase, register
 from voidrecon.utils import net
-from voidrecon.utils.text import find_secrets
+from voidrecon.utils.text import find_secrets_classified
 
 _SCRIPT_SRC_RE = re.compile(r"""<script[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
 _ENDPOINT_RE = re.compile(r"""["'`](/[A-Za-z0-9_\-./]{2,120}?)["'`]""")
@@ -87,32 +87,52 @@ class JsAnalysis(Module):
         body = await ctx.http.get_text(url)
         if not body:
             return
-        # Secrets
-        secrets = find_secrets(body)
+        # Secrets. A confirmed vendor token (AKIA/AIza/ghp_/sk_live/JWT/private key)
+        # is a real lead; the generic key="value" match in a minified bundle is not
+        # — bundles are full of high-entropy strings. Only the former is HIGH and
+        # only the former seeds the Analyst's "secret" attack signal.
+        secrets = find_secrets_classified(body)
         if secrets:
             host = net.host_from_url(url)
-            asset = None
-            for kind in (AssetKind.SUBDOMAIN, AssetKind.DOMAIN):
-                asset = ctx.store.get_asset(kind, host) if host else None
+            confirmed = [(label, snip) for label, snip, hi in secrets if hi]
+            candidates = [(label, snip) for label, snip, hi in secrets if not hi]
+            if confirmed:
+                asset = None
+                for kind in (AssetKind.SUBDOMAIN, AssetKind.DOMAIN):
+                    asset = ctx.store.get_asset(kind, host) if host else None
+                    if asset:
+                        break
                 if asset:
-                    break
-            if asset:
-                asset.attrs["secrets_found"] = True
-            labels = sorted({label for label, _ in secrets})
-            ctx.add_finding(
-                f"Possible secrets in JavaScript: {url}",
-                module=self.name,
-                severity=Severity.HIGH,
-                confidence=Confidence.TENTATIVE,
-                asset=host,
-                description=(
-                    "Secret-like strings were found in a JavaScript bundle. Verify each by "
-                    "hand — many are public keys, sample values, or false positives. Never "
-                    "use discovered credentials beyond confirming validity within scope."
-                ),
-                evidence={"url": url, "types": labels, "samples": [s for _, s in secrets][:10]},
-                tags={"secret", "js"},
-            )
+                    asset.attrs["secrets_found"] = True   # only real tokens seed plays
+                labels = sorted({label for label, _ in confirmed})
+                ctx.add_finding(
+                    f"Live credential in JavaScript ({', '.join(labels)}): {url}",
+                    module=self.name, severity=Severity.HIGH, confidence=Confidence.LIKELY,
+                    asset=host,
+                    description=(
+                        "A structurally-valid vendor credential was found in a JS bundle. Verify "
+                        "it is live and in-scope before reporting; never use it beyond confirming "
+                        "validity."
+                    ),
+                    evidence={"url": url, "types": labels, "samples": [s for _, s in confirmed][:10]},
+                    tags={"secret", "js"},
+                )
+            elif candidates:
+                # No classified vendor token — record as a low-priority lead, do NOT
+                # mark the host as leaking and do NOT tag "secret" (keeps it out of
+                # attack plays). This is the fix for the empty-secret_types HIGH FP.
+                ctx.add_finding(
+                    f"High-entropy string(s) in JavaScript (unclassified — likely not a secret): {url}",
+                    module=self.name, severity=Severity.INFO, confidence=Confidence.TENTATIVE,
+                    asset=host,
+                    description=(
+                        "Entropy-screened strings matched a generic key=value shape but no known "
+                        "credential format. In minified bundles these are almost always hashes, "
+                        "ids, or asset names — triage by hand, don't assume a leak."
+                    ),
+                    evidence={"url": url, "types": [], "samples": [s for _, s in candidates][:8]},
+                    tags={"secret-candidate", "js"},
+                )
         # Endpoints
         endpoints = set(_ENDPOINT_RE.findall(body)[:300])
         for path in endpoints:

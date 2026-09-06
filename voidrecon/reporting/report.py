@@ -339,21 +339,28 @@ class Reporter:
         if not findings:
             lines.append("_No findings recorded._")
         else:
+            # Cap the long tail so the operator report stays readable — the full,
+            # unabridged set is always in voidrecon.json.
+            caps = {"critical": 1000, "high": 1000, "medium": 200, "low": 100, "info": 50}
+            by_sev: dict[str, list] = {}
             for f in findings:
-                lines.append(f"### [{f.severity.value.upper()}] {f.title}")
-                if f.asset:
-                    lines.append(f"- **Asset:** `{f.asset}`")
-                lines.append(f"- **Module:** {f.module} · **Confidence:** {f.confidence.value}")
-                if f.description:
-                    lines.append(f"- {f.description}")
-                ev_urls = self._evidence_urls(f)
-                if ev_urls:
-                    lines.append("- **Where to test:**")
-                    for u in ev_urls:
-                        lines.append(f"    - `{u}`")
-                refs_extra = [r for r in f.references if r not in ev_urls]
-                if refs_extra:
-                    lines.append(f"- Refs: {', '.join(refs_extra)}")
+                by_sev.setdefault(f.severity.value, []).append(f)
+            for sev in ("critical", "high", "medium", "low", "info"):
+                group = by_sev.get(sev, [])
+                if not group:
+                    continue
+                shown = group[: caps.get(sev, 100)]
+                lines.append(f"### {sev.upper()} ({len(group)})")
+                for f in shown:
+                    lines.append(f"- **{f.title}**"
+                                 + (f" — `{f.asset}`" if f.asset else "")
+                                 + f"  _{f.module}/{f.confidence.value}_")
+                    ev_urls = self._evidence_urls(f)
+                    if ev_urls:
+                        lines.append("  - Where to test: " + ", ".join(f"`{u}`" for u in ev_urls))
+                more = len(group) - len(shown)
+                if more > 0:
+                    lines.append(f"- _… {more} more {sev} finding(s) in `voidrecon.json`._")
                 lines.append("")
 
         if self._candidate_files:
@@ -419,15 +426,14 @@ class Reporter:
             href = u if u.lower().startswith(("http://", "https://")) else ""
             return f'<a href="{href}" target="_blank" rel="noreferrer">{u}</a>' if href else f"<code>{u}</code>"
 
-        findings_html = ""
-        for f in findings:
+        def _finding_card(f) -> str:
             color = _SEV_COLOR.get(f.severity.value, "#546e7a")
             ev_urls = self._evidence_urls(f)
             refs = "".join(f'<a href="{esc(r)}" target="_blank">{esc(r)}</a> '
                            for r in f.references if r not in ev_urls)
             where = ("<div class='where'><b>Where to test:</b><ul>"
                      + "".join(f"<li>{_link(u)}</li>" for u in ev_urls) + "</ul></div>") if ev_urls else ""
-            findings_html += (
+            return (
                 f'<div class="finding" style="border-left-color:{color}">'
                 f'<span class="badge" style="background:{color}">{esc(f.severity.value.upper())}</span> '
                 f'<strong>{esc(f.title)}</strong>'
@@ -435,6 +441,33 @@ class Reporter:
                 + (f' · <code>{esc(f.asset)}</code>' if f.asset else "")
                 + f'</div><p>{esc(f.description)}</p>{where}'
                 + (f'<p class="refs">{refs}</p>' if refs else "") + "</div>"
+            )
+
+        # Findings are grouped and collapsed by severity so a 5000-finding run is a
+        # navigable summary, not a 29k-line dump. Critical/High open by default; the
+        # long tail (Medium/Low/Info) is collapsed and capped, with the full set in
+        # voidrecon.json. This is the fix for the report-size complaint.
+        _CAPS = {"critical": 1000, "high": 1000, "medium": 300, "low": 150, "info": 75}
+        by_sev: dict[str, list] = {}
+        for f in findings:
+            by_sev.setdefault(f.severity.value, []).append(f)
+        findings_html = ""
+        for sev in ("critical", "high", "medium", "low", "info"):
+            group = by_sev.get(sev, [])
+            if not group:
+                continue
+            color = _SEV_COLOR.get(sev, "#546e7a")
+            cap = _CAPS.get(sev, 100)
+            shown = group[:cap]
+            more = len(group) - len(shown)
+            cards_html = "".join(_finding_card(f) for f in shown)
+            note = (f'<p class="meta">… {more} more {sev} finding(s) omitted here — '
+                    f'see <code>voidrecon.json</code> for the full set.</p>' if more > 0 else "")
+            is_open = " open" if sev in ("critical", "high") else ""
+            findings_html += (
+                f'<details class="sevgroup"{is_open}>'
+                f'<summary><span class="badge" style="background:{color}">{esc(sev.upper())}</span> '
+                f'{len(group)} finding(s)</summary>{cards_html}{note}</details>'
             )
         if not findings_html:
             findings_html = "<p><em>No findings recorded.</em></p>"
@@ -595,6 +628,10 @@ class Reporter:
   td.good {{ color:#3fb950; }} td.warn {{ color:#d29922; }} td.bad {{ color:#f85149; font-weight:700; }}
   .cov-warn {{ background:#2d2212; border:1px solid #9e6a03; border-radius:8px; padding:10px 14px; color:#e3b341; font-size:13px; }}
   .pill {{ background:#1f6feb33; color:#79c0ff; border:1px solid #1f6feb55; border-radius:20px; padding:1px 9px; font-size:11px; font-weight:700; }}
+  details.sevgroup {{ margin-bottom:14px; border:1px solid var(--border); border-radius:8px; padding:6px 10px; background:#0f141b; }}
+  details.sevgroup > summary {{ cursor:pointer; font-weight:700; padding:6px 2px; list-style:none; }}
+  details.sevgroup > summary::-webkit-details-marker {{ display:none; }}
+  details.sevgroup[open] > summary {{ border-bottom:1px solid var(--border); margin-bottom:10px; }}
   code {{ background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }}
   .gallery {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }}
   figure {{ margin:0; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }}

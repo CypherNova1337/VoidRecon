@@ -8,11 +8,18 @@ def test_juicy_keywords_raise_score():
     assert score_asset(admin)[0] > score_asset(plain)[0]
 
 
-def test_takeover_candidate_scores_high():
-    a = Asset(AssetKind.SUBDOMAIN, "old.example.com", attrs={"takeover_candidate": True})
+def test_confirmed_takeover_scores_high():
+    a = Asset(AssetKind.SUBDOMAIN, "old.example.com", attrs={"takeover_confirmed": "AWS S3"})
     score, reasons = score_asset(a)
     assert score >= 30
-    assert any("takeover" in r for r in reasons)
+    assert any("takeover_confirmed" in r for r in reasons)
+
+
+def test_unconfirmed_takeover_lead_scores_low():
+    # a mere CNAME-to-provider lead must NOT score like a confirmed takeover
+    lead = Asset(AssetKind.SUBDOMAIN, "old.example.com", attrs={"takeover_lead": "AWS S3"})
+    confirmed = Asset(AssetKind.SUBDOMAIN, "old.example.com", attrs={"takeover_confirmed": "AWS S3"})
+    assert score_asset(lead)[0] < score_asset(confirmed)[0]
 
 
 def test_risky_ports_add_score():
