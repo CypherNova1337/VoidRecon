@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.8.1]
+
+### Fixed — third-party attribution leak (from the v0.8.0 re-review)
+- **Findings stay inside the scope domain set.** The crawler could follow an OAuth
+  redirect chain and attribute a third party's document to the target — e.g.
+  `accounts.google.com/.well-known/openid-configuration` reported as an exposed
+  Fivetran spec. Now:
+  - `api_discovery` checks the **final** response URL after redirects; a spec/doc
+    that resolves onto an off-domain host (`accounts.google.com`) is never emitted.
+  - New `RunContext.is_target_host` / `is_target_url` define engagement membership
+    (in scope, or under a seed apex; discovered IPs count).
+  - `add_finding` labels any finding naming an off-domain host `third-party`
+    (intentionally-external leads — scope expansion, provider CNAMEs — are left
+    alone), and the Analyst excludes off-domain hosts from dossiers and plays.
+
 ## [0.8.0] — Sifter
 
 ### Fixed — SQLi false positives on static assets (from the v0.7.0 fivetran re-review)

@@ -80,6 +80,24 @@ class RunContext:
     def source_key(self, name: str) -> str | None:
         return self.config.get(f"sources.{name}")
 
+    def is_target_host(self, host: str) -> bool:
+        """True if a host belongs to the engagement — positively in scope, or a
+        subdomain of a seed apex. Off-domain hosts the crawler wandered onto via a
+        redirect/link (e.g. ``accounts.google.com`` from an OAuth chain) are NOT
+        target hosts, and findings must never attribute them to the target."""
+        if not host:
+            return False
+        host = net.normalize_host(host)
+        if not host or net.is_ip(host):
+            return net.is_ip(host)   # discovered IPs are engagement infra
+        from voidrecon.core.models import ScopeState
+
+        return self.scope.classify_host(host) == ScopeState.IN_SCOPE or self.scope.is_related(host)
+
+    def is_target_url(self, url: str) -> bool:
+        host = net.host_from_url(url) or net.normalize_host(url)
+        return self.is_target_host(host)
+
     def note_source(self, source: str, seed: str, outcome, count: int) -> None:
         """Record what a passive source returned, so zeros can be explained.
 
@@ -147,6 +165,18 @@ class RunContext:
     ) -> Finding:
         from voidrecon.core.models import Severity
 
+        tags = set(tags or set())
+        # Defence in depth against attributing a third party's asset to the target:
+        # if a finding names an off-domain host (a domain that isn't in scope and
+        # isn't under a seed apex), label it 'third-party' so the report and the
+        # Analyst can exclude it from the target's story. Intentionally-external
+        # leads (scope expansion, provider CNAMEs) are left alone.
+        _intentional = {"scope-expansion", "takeover-candidate", "attribution", "third-party"}
+        if asset and not (tags & _intentional):
+            host = net.host_from_url(asset) or net.normalize_host(asset)
+            if host and not net.is_ip(host) and net.is_domain(host) and not self.is_target_host(host):
+                tags.add("third-party")
+
         finding = Finding(
             title=title,
             severity=severity or Severity.INFO,
@@ -156,7 +186,7 @@ class RunContext:
             description=description,
             evidence=evidence or {},
             references=references or [],
-            tags=tags or set(),
+            tags=tags,
         )
         return self.store.add_finding(finding)
 

@@ -73,6 +73,12 @@ class ApiDiscovery(Module):
             resp = await ctx.http.get(url)
             if resp is None or resp.status_code >= 400:
                 continue
+            # A cross-domain redirect (e.g. an OAuth chain landing on
+            # accounts.google.com) means this response is NOT the target's — never
+            # attribute a third party's discovery/spec doc to the engagement.
+            final_url = str(getattr(resp, "url", url))
+            if not ctx.is_target_url(final_url):
+                continue
             ctype = (resp.headers.get("content-type") or "").lower()
             body = resp.text[:8000]
             low = body.lower()

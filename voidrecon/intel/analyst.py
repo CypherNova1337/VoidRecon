@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from voidrecon.core.models import AssetKind, ScopeState
 from voidrecon.intel.scoring import _findings_by_asset, top_assets
+from voidrecon.utils import net
 from voidrecon.utils.text import truncate
 
 # Attack chains recognised from the *combined* signal set on a single host. Each
@@ -215,9 +216,16 @@ def analyze(ctx, limit: int = 10) -> dict:
 
     dossiers: list[dict] = []
     for key, asset in candidates.items():
-        # Never headline a play on a host the scope engine says is out of bounds.
+        # Never headline a play on a host the scope engine says is out of bounds…
         if getattr(asset, "scope_state", None) == ScopeState.OUT_OF_SCOPE:
             continue
+        # …or on an off-domain host the crawler wandered onto (links, OAuth
+        # redirects) — those are not the target's attack surface.
+        if asset.kind in (AssetKind.SUBDOMAIN, AssetKind.DOMAIN, AssetKind.URL, AssetKind.ENDPOINT):
+            host = net.host_from_url(asset.value) if asset.kind in (AssetKind.URL, AssetKind.ENDPOINT) \
+                else asset.value
+            if not ctx.is_target_host(host):
+                continue
         findings = idx.get(asset.value.lower(), []) or idx.get(key, [])
         d = _dossier(asset, findings)
         if d["worth"]:
