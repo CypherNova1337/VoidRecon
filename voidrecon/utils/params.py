@@ -20,15 +20,24 @@ ANALYTICS_PARAMS = {
     "hsa_acc", "hsa_cam", "hsa_grp", "hsa_ad", "hsa_src", "hsa_tgt", "hsa_kw",
 }
 
-# OAuth / OIDC / auth-flow control params. These are protocol plumbing (often
-# single-use), not user-controlled sinks — an old ``code`` in an archived OAuth
-# return URL is not an RCE/SSRF/SQLi candidate.
+# OAuth / OIDC *token* params — protocol plumbing, single-use, never a sink of
+# any injection class. NOTE: redirect_uri/callback/return/next live in
+# REDIRECT_PARAMS below, NOT here — they ARE the open-redirect/SSRF surface and
+# must stay classifiable.
 OAUTH_FLOW_PARAMS = {
     "code", "state", "scope", "response_type", "response_mode", "grant_type",
     "client_id", "client_secret", "nonce", "id_token", "access_token", "refresh_token",
-    "token", "id_token_hint", "session_state", "auth", "authuser", "prompt",
-    "redirect_uri", "redirect_url", "callback", "code_challenge", "code_challenge_method",
-    "code_verifier", "login_hint", "acr_values", "request_uri",
+    "token", "id_token_hint", "session_state", "prompt", "code_challenge",
+    "code_challenge_method", "code_verifier", "login_hint", "acr_values", "authuser",
+}
+
+# Redirect / SSRF surface params — user-influenced destinations. These are exactly
+# the open-redirect and SSRF sinks, so they must NOT be filtered out as "benign".
+REDIRECT_PARAMS = {
+    "url", "redirect", "redirect_uri", "redirect_url", "redirect_to", "redirectto",
+    "next", "next_page", "dest", "destination", "return", "returnto", "return_to",
+    "return_url", "returnurl", "continue", "callback", "go", "goto", "target", "to",
+    "out", "u", "r", "rurl", "redir", "link", "forward", "uri", "path", "request_uri",
 }
 
 # Pure presentation / navigation params — not injection surfaces.
@@ -47,16 +56,26 @@ def is_oauth_param(name: str) -> bool:
     return (name or "").lower() in OAUTH_FLOW_PARAMS
 
 
-def is_benign_param(name: str) -> bool:
-    """True for parameters that are not an injection surface for *any* class —
-    analytics, auth-flow plumbing, and pure presentation controls."""
+def is_redirect_param(name: str) -> bool:
+    return (name or "").lower() in REDIRECT_PARAMS
+
+
+def is_never_injectable(name: str) -> bool:
+    """True for params that are not an injection surface for *any* class —
+    analytics, OAuth *token* plumbing, and pure presentation. Redirect/SSRF
+    surface params are deliberately excluded from this set."""
     n = (name or "").lower()
     return is_analytics_param(n) or is_oauth_param(n) or n in PRESENTATION_PARAMS
 
 
+# Back-compat alias.
+def is_benign_param(name: str) -> bool:
+    return is_never_injectable(name)
+
+
 def worth_injecting(name: str) -> bool:
-    """Whether a parameter is worth spending an active injection probe on."""
-    return bool(name) and not is_benign_param(name)
+    """Whether a parameter is worth an active injection probe (SQLi/SSTI/etc.)."""
+    return bool(name) and not is_never_injectable(name)
 
 
 # Path markers and extensions that mean "this is a static asset, not a

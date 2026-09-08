@@ -7,6 +7,29 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.8.2]
+
+### Fixed — OAuth/OIDC handling + open-redirect over-filtering (v0.8.1 re-review)
+- **OIDC discovery is not an "exposed spec".** A ``/.well-known/openid-configuration``
+  is public by design; it was being reported as an "Exposed API specification"
+  pointing at the identity provider (accounts.google.com). It's now an INFO
+  **OAuth/OIDC** signal attributed to the in-scope host, recording the issuer and
+  authorize/token endpoints as recon — not an exposure, not attributed to the IdP.
+- **Harvested OAuth URLs become in-scope intel.** OAuth authorization/sign-in URLs
+  the crawler picks up (e.g. ``accounts.google.com/o/oauth2/auth?client_id=…&
+  redirect_uri=https://backstage.example.com/…``) are now mined for the target's
+  client_id and the **in-scope redirect hosts** they trust, emitted as a LOW
+  ``oauth-flow`` finding attributed to the in-scope host (and those redirect hosts
+  recorded as assets) — surfacing real surface instead of a third-party finding.
+- **Open-redirect / SSRF params no longer over-filtered.** 0.7.0's benign-param
+  screen wrongly swept ``redirect_uri``/``next``/``return``/``url`` — the actual
+  open-redirect & SSRF surface — into the excluded OAuth set, silently dropping
+  those candidates. OAuth *token* params (``code``, ``state``, ``client_id``, …)
+  stay excluded; the redirect/SSRF surface is classifiable again.
+- **Resilience:** an optional native dep (``cryptography``) that fails to import
+  with a low-level pyo3 panic no longer crashes module loading — the guard catches
+  ``BaseException``, so the module simply skips as designed.
+
 ## [0.8.1]
 
 ### Fixed — third-party attribution leak (from the v0.8.0 re-review)

@@ -96,7 +96,36 @@ class ApiDiscovery(Module):
                                     evidence={"url": url}, tags={"well-known"})
                 continue
 
-            if path.endswith(".json") or "api-docs" in path or path.endswith("openid-configuration"):
+            if path.endswith("openid-configuration"):
+                # An OIDC discovery document is PUBLIC BY DESIGN — never an "exposed
+                # spec". Its value is the OAuth intel it leaks (the IdP + endpoints),
+                # attributed to THIS in-scope host, not to the IdP it points at.
+                if "json" not in ctype:
+                    continue
+                try:
+                    data = resp.json()
+                except Exception:
+                    continue
+                if not (isinstance(data, dict) and "issuer" in data):
+                    continue
+                ctx.add_asset(AssetKind.ENDPOINT, url, source=self.name,
+                              confidence=Confidence.CONFIRMED, kind_hint="oidc_config")
+                found += 1
+                ctx.add_finding(
+                    f"OAuth/OIDC discovery document on {origin} (public)",
+                    module=self.name, severity=Severity.INFO, confidence=Confidence.CONFIRMED,
+                    asset=origin,
+                    description=("A standard, public OpenID Connect discovery document — not an "
+                                 "exposure. Useful recon: it names the identity provider and the "
+                                 "authorize/token endpoints this host federates to."),
+                    evidence={"url": url, "issuer": data.get("issuer"),
+                              "authorization_endpoint": data.get("authorization_endpoint"),
+                              "token_endpoint": data.get("token_endpoint")},
+                    tags={"oauth", "oidc"},
+                )
+                continue
+
+            if path.endswith(".json") or "api-docs" in path:
                 # Must be actual JSON with spec markers — a 200 text/html here is
                 # the app's catch-all route, NOT an exposed spec.
                 if "json" not in ctype:
@@ -106,7 +135,7 @@ class ApiDiscovery(Module):
                 except Exception:
                     continue
                 if not (isinstance(data, dict) and
-                        any(k in data for k in ("swagger", "openapi", "paths", "issuer"))):
+                        any(k in data for k in ("swagger", "openapi", "paths"))):
                     continue
             elif path.endswith((".yaml", ".yml")):
                 if not ("yaml" in ctype or low.lstrip().startswith(("openapi:", "swagger:"))):

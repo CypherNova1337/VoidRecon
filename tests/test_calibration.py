@@ -214,6 +214,76 @@ def test_analyst_excludes_off_domain_finding_host():
     assert all("google.com" not in t["asset"] for t in plan["targets"])
 
 
+# ---- OAuth/OIDC: in-scope attribution, not third-party spec ---------------
+def test_oidc_config_is_oauth_signal_not_spec():
+    import json
+
+    from voidrecon.modules.content import api_discovery
+
+    ctx = RunContext(Config.load(overrides={"opsec": {"allow_active": True}}),
+                     Scope.from_lists(["example.com"]))
+    ctx.store.add_asset(Asset(AssetKind.SUBDOMAIN, "login.example.com", tags={"web"},
+                              attrs={"http_url": "https://login.example.com/"}))
+
+    class _R:
+        def __init__(self, url, status=200, ctype="application/json", body=""):
+            self.url, self.status_code = url, status
+            self.headers, self.text = {"content-type": ctype}, body
+            self._b = body
+
+        def json(self):
+            return json.loads(self._b)
+
+    async def fake_get(url, **kw):
+        if url.endswith("/.well-known/openid-configuration"):
+            return _R(url, body=json.dumps({
+                "issuer": "https://accounts.google.com",
+                "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth"}))
+        return _R(url, status=404, body="")
+
+    async def fake_request(method, url, **kw):
+        return None
+
+    client = ctx.http
+    client.get = fake_get
+    client.request = fake_request
+    asyncio.run(api_discovery.ApiDiscovery()._probe(ctx, "https://login.example.com"))
+    assert not [f for f in ctx.store.findings() if "Exposed API specification" in f.title]
+    oidc = [f for f in ctx.store.findings() if "OIDC discovery" in f.title]
+    assert oidc and oidc[0].severity == Severity.INFO and oidc[0].asset == "https://login.example.com"
+
+
+def test_oauth_intel_attributes_to_in_scope_host():
+    from voidrecon.intel import correlate
+
+    ctx = _scoped()   # scope fivetran.com
+    ctx.store.add_asset(Asset(AssetKind.URL,
+        "https://accounts.google.com/o/oauth2/auth"
+        "?client_id=123.apps.googleusercontent.com"
+        "&redirect_uri=https://backstage.fivetran.com/callback"))
+    correlate._oauth_flow_intel(ctx)
+    fs = [f for f in ctx.store.findings() if "OAuth client config leaked" in f.title]
+    assert fs
+    f = fs[0]
+    assert f.asset == "backstage.fivetran.com"        # in-scope, NOT accounts.google.com
+    assert "third-party" not in f.tags
+    assert f.evidence["client_id"] == "123.apps.googleusercontent.com"
+    assert "backstage.fivetran.com" in f.evidence["in_scope_redirect_hosts"]
+
+
+def test_redirect_params_stay_classifiable():
+    from voidrecon.modules.vuln.vuln_hints import VulnHints
+    from voidrecon.utils.params import worth_injecting
+
+    # the open-redirect/SSRF surface must NOT be filtered out as benign
+    assert worth_injecting("next") and worth_injecting("redirect_uri") and worth_injecting("url")
+    ctx = _ctx()
+    ctx.store.add_asset(Asset(AssetKind.URL, "https://example.com/login?next=/dashboard&url=/x"))
+    asyncio.run(VulnHints().run(ctx))
+    cats = {f.evidence["category"] for f in ctx.store.findings() if "candidate endpoint" in f.title}
+    assert "redirect" in cats or "ssrf" in cats
+
+
 # ---- analyst: out-of-scope host never headlines a play --------------------
 def test_analyst_excludes_out_of_scope():
     from voidrecon.core.models import ScopeState

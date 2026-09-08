@@ -24,8 +24,11 @@ try:
     from cryptography import x509
 
     _HAS_CRYPTO = True
-except Exception:  # pragma: no cover
+except BaseException:  # noqa: BLE001 - a broken/ABI-mismatched native build can
+    # raise pyo3 PanicException (a BaseException), not just Exception; an optional
+    # dep must never crash module loading.
     _HAS_CRYPTO = False
+    x509 = None  # type: ignore
 
 
 @register

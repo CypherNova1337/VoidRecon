@@ -44,10 +44,65 @@ def correlate(ctx: RunContext) -> None:
     _cluster_by_ip(ctx)
     _flag_takeover_candidates(ctx)
     _verify_bucket_ownership(ctx)
+    _oauth_flow_intel(ctx)
     _dense_netblocks(ctx)
     _cluster_by_favicon(ctx)
     _cluster_by_tracker(ctx)
     _out_of_scope_leads(ctx)
+
+
+def _oauth_flow_intel(ctx: RunContext) -> None:
+    """Turn harvested OAuth authorization URLs into in-scope recon.
+
+    The crawler picks up links like ``accounts.google.com/o/oauth2/auth?client_id=…
+    &redirect_uri=https://backstage.example.com/…``. That URL is a third party's,
+    but it *leaks the target's own* OAuth client_id and the redirect URIs the app
+    trusts — real, in-scope attack surface (redirect/token-theft testing). So we
+    attribute it to the in-scope redirect host, never to the IdP."""
+    from urllib.parse import parse_qs, urlsplit
+
+    from voidrecon.utils import net
+
+    _CID = ("client_id", "clientid", "client", "app_id", "appid")
+    _RED = ("redirect_uri", "redirect_url", "redirect", "continue", "callback", "next", "return")
+    flows: dict[str, dict] = {}
+    for a in ctx.store.assets(kind=AssetKind.URL) + ctx.store.assets(kind=AssetKind.ENDPOINT):
+        try:
+            q = parse_qs(urlsplit(a.value).query)
+        except Exception:
+            continue
+        cid = next((q[k][0] for k in _CID if q.get(k)), None)
+        if not cid:
+            continue
+        redirs = [v for k in _RED for v in q.get(k, [])]
+        rec = flows.setdefault(cid, {"redirect_uris": set(), "authorize": set(), "in_scope": set()})
+        rec["authorize"].add(a.value.split("?")[0])
+        for r in redirs:
+            rec["redirect_uris"].add(r)
+            h = net.host_from_url(r)
+            if h and ctx.is_target_host(h):
+                rec["in_scope"].add(h)
+
+    for cid, rec in flows.items():
+        in_scope = sorted(rec["in_scope"])
+        if not in_scope:
+            continue   # only worth reporting when it leaks an in-scope redirect target
+        for h in in_scope:
+            kind = AssetKind.DOMAIN if net.registrable_domain(h) == h else AssetKind.SUBDOMAIN
+            ctx.add_asset(kind, h, source="oauth_intel", confidence=Confidence.LIKELY,
+                          via_oauth_client=cid)
+        ctx.add_finding(
+            f"OAuth client config leaked: {len(in_scope)} in-scope redirect host(s) — {in_scope[0]}",
+            module="correlate", severity=Severity.LOW, confidence=Confidence.LIKELY,
+            asset=in_scope[0],
+            description=("A harvested OAuth authorization URL exposes the target's client_id and the "
+                         "redirect URIs it trusts. The in-scope redirect hosts are valid surface — "
+                         "test them for open redirect / OAuth redirect-URI abuse and token theft."),
+            evidence={"client_id": cid, "in_scope_redirect_hosts": in_scope,
+                      "redirect_uris": sorted(rec["redirect_uris"])[:20],
+                      "authorize_urls": sorted(rec["authorize"])[:5]},
+            tags={"oauth-flow", "attribution"},
+        )
 
 
 def _verify_bucket_ownership(ctx: RunContext) -> None:
