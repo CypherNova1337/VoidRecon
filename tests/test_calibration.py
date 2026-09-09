@@ -284,6 +284,36 @@ def test_redirect_params_stay_classifiable():
     assert "redirect" in cats or "ssrf" in cats
 
 
+# ---- "Where to test" points at in-scope surface ---------------------------
+def test_where_to_test_uses_in_scope_asset_not_followed_redirect(tmp_path):
+    from voidrecon.reporting.report import Reporter
+
+    cfg = Config.load(overrides={"general": {"output_dir": str(tmp_path)}})
+    ctx = RunContext(cfg, Scope.from_lists(["fivetran.com"]))
+    ctx.output_dir = tmp_path / "run"
+    ctx.store.add_finding(Finding(
+        "Missing security headers on backstage.fivetran.com",
+        severity=Severity.LOW, module="http_analysis", asset="backstage.fivetran.com",
+        evidence={"url": "https://accounts.google.com/o/oauth2/auth?client_id=x"},
+        tags={"headers"}))
+    urls = Reporter(ctx, {})._evidence_urls(ctx.store.findings()[0])
+    assert urls == ["https://backstage.fivetran.com/"]      # not the followed Google URL
+    assert not any("google.com" in u for u in urls)
+
+
+def test_where_to_test_keeps_off_domain_for_external_leaks(tmp_path):
+    from voidrecon.reporting.report import Reporter
+
+    cfg = Config.load(overrides={"general": {"output_dir": str(tmp_path)}})
+    ctx = RunContext(cfg, Scope.from_lists(["fivetran.com"]))
+    ctx.output_dir = tmp_path / "run"
+    ctx.store.add_finding(Finding(
+        "GitHub — leak", severity=Severity.MEDIUM, module="github_dork", asset="fivetran.com",
+        evidence={"url": "https://github.com/x/y/config"}, tags={"github", "leak-candidate"}))
+    urls = Reporter(ctx, {})._evidence_urls(ctx.store.findings()[0])
+    assert urls == ["https://github.com/x/y/config"]        # external leak keeps its URL
+
+
 # ---- analyst: out-of-scope host never headlines a play --------------------
 def test_analyst_excludes_out_of_scope():
     from voidrecon.core.models import ScopeState

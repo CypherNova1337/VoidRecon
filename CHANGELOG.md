@@ -7,6 +7,18 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.8.3]
+
+### Fixed — "Where to test" points at in-scope surface
+- The finding attribution was correct, but the **"Where to test" URL could still
+  show a host the crawler merely followed a redirect to** (e.g. a Google OAuth URL
+  on a "missing security headers" finding for an in-scope host). Now the report
+  drops evidence URLs whose host is outside the engagement and falls back to the
+  finding's own in-scope asset URL — so the pointer always aims at the target's
+  surface. External-leak findings whose off-domain URL *is* the point (GitHub
+  hits, subdomain-takeover, OAuth-flow intel, cloud buckets, breaches, scope
+  expansion) keep their URL.
+
 ## [0.8.2]
 
 ### Fixed — OAuth/OIDC handling + open-redirect over-filtering (v0.8.1 re-review)

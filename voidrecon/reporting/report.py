@@ -216,8 +216,15 @@ class Reporter:
                                 if d["status"] in self._HEALTH_RANK else 99, d["source"]))
         return out
 
-    @staticmethod
-    def _evidence_urls(finding) -> list[str]:
+    # Findings whose evidence URL is *meant* to be off-domain — the external leak
+    # or resource IS the point. Everything else must point "where to test" at the
+    # target's own surface, never at a host the crawler merely followed a redirect to.
+    _OFFDOMAIN_OK = {"github", "leak-candidate", "takeover", "takeover-candidate",
+                     "oauth-flow", "breach", "scope-expansion", "cloud", "attribution"}
+
+    def _evidence_urls(self, finding) -> list[str]:
+        from voidrecon.utils import net
+
         ev = finding.evidence or {}
         urls: list[str] = []
         if ev.get("url"):
@@ -228,12 +235,35 @@ class Reporter:
                 urls.extend(str(x) for x in v)
             elif isinstance(v, str):
                 urls.append(v)
+
+        offdomain_ok = bool(set(finding.tags) & self._OFFDOMAIN_OK)
+        if not offdomain_ok:
+            # Drop URLs that point at a host outside the engagement (a followed
+            # redirect); relative paths (no host) are kept — they're on the asset.
+            kept = []
+            for u in urls:
+                host = net.host_from_url(u)
+                if not host or self.ctx.is_target_host(host):
+                    kept.append(u)
+            urls = kept
+
         # de-dup preserve order
         seen, out = set(), []
         for u in urls:
             if u not in seen:
                 seen.add(u)
                 out.append(u)
+
+        # If nothing in-scope survived, point at the finding's own (in-scope) asset.
+        if not out and finding.asset and not offdomain_ok:
+            a = str(finding.asset)
+            if a.startswith(("http://", "https://")):
+                if self.ctx.is_target_url(a):
+                    out = [a]
+            else:
+                host = net.normalize_host(a)
+                if host and self.ctx.is_target_host(host):
+                    out = [f"https://{host}/"]
         return out[:8]
 
     # ---- Markdown ---------------------------------------------------------
