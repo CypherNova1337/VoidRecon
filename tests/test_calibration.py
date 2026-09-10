@@ -314,6 +314,45 @@ def test_where_to_test_keeps_off_domain_for_external_leaks(tmp_path):
     assert urls == ["https://github.com/x/y/config"]        # external leak keeps its URL
 
 
+# ---- playbook ordering + count readability --------------------------------
+def test_tentative_finding_never_leads_playbook():
+    from voidrecon.core.models import Confidence
+    from voidrecon.intel import advisor
+
+    ctx = _ctx()
+    ctx.store.add_asset(Asset(AssetKind.SUBDOMAIN, "a.example.com", score=40))
+    ctx.store.add_finding(Finding("sqli candidate", severity=Severity.HIGH, module="sqli_probe",
+                                  asset="a.example.com", confidence=Confidence.TENTATIVE,
+                                  tags={"sqli"}))
+    ctx.store.add_finding(Finding("takeover", severity=Severity.HIGH, module="takeover_verify",
+                                  asset="b.example.com", confidence=Confidence.CONFIRMED,
+                                  tags={"takeover"}))
+    recs = advisor.recommend(ctx)
+    assert recs and "takeover" in recs[0]["action"].lower()     # confirmed leads
+    sqli_rank = next(i for i, r in enumerate(recs) if "SQL" in r["action"])
+    review_rank = next(i for i, r in enumerate(recs) if "highest-scoring" in r["action"])
+    assert sqli_rank > review_rank                              # tentative below the review step
+
+
+def test_findings_by_module_breakdown_in_report(tmp_path):
+    from voidrecon.reporting.report import Reporter
+
+    cfg = Config.load(overrides={"general": {"output_dir": str(tmp_path)}})
+    ctx = RunContext(cfg, Scope.from_lists(["example.com"]))
+    ctx.output_dir = tmp_path / "run"
+    for i in range(30):
+        ctx.store.add_finding(Finding(f"blob {i}", severity=Severity.INFO, module="blob_mining",
+                                      asset=f"h{i}.example.com"))
+    for i in range(5):
+        ctx.store.add_finding(Finding(f"hdr {i}", severity=Severity.INFO, module="http_analysis",
+                                      asset=f"g{i}.example.com"))
+    r = Reporter(ctx, {})
+    assert r._findings_by_module()[0] == ("blob_mining", 30)
+    md = r.render_markdown()
+    assert "by source:" in md and "blob_mining 30" in md
+    assert "bysrc" in r.render_html()
+
+
 # ---- analyst: out-of-scope host never headlines a play --------------------
 def test_analyst_excludes_out_of_scope():
     from voidrecon.core.models import ScopeState

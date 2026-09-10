@@ -82,15 +82,21 @@ def summarize(ctx) -> str:
     return analyst.analyze(ctx)["summary"]
 
 
+_CONF_RANK = {"tentative": 0, "likely": 1, "confirmed": 2}
+
+
 def recommend(ctx, limit: int = 12) -> list[dict]:
     store = ctx.store
     findings = store.findings()
     tags_present: dict[str, list[str]] = {}
+    tag_conf: dict[str, int] = {}   # best confidence seen for each tag
     for f in findings:
+        cr = _CONF_RANK.get(f.confidence.value, 0)
         for tag in f.tags:
             tags_present.setdefault(tag, [])
             if f.asset:
                 tags_present[tag].append(f.asset)
+            tag_conf[tag] = max(tag_conf.get(tag, -1), cr)
 
     seed = ctx.scope.seeds[0] if ctx.scope.seeds else "target"
     done = set(getattr(store, "completed_modules", set()) or set())
@@ -100,8 +106,11 @@ def recommend(ctx, limit: int = 12) -> list[dict]:
         if not assets and tag not in tags_present:
             continue
         uniq = sorted({a for a in assets if a})[:8]
+        # A step backed only by tentative evidence must never lead the playbook —
+        # demote it below every confirmed-signal step (and the review step).
+        priority = rank - 60 if tag_conf.get(tag, 2) == 0 else rank
         recs.append({
-            "priority": rank,
+            "priority": priority,
             "action": action,
             "why": why,
             "targets": uniq,

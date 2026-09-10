@@ -7,6 +7,21 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.9.0] — Warrant
+
+Client-ready milestone: after a run of external field reviews (see
+`TOOL_FEEDBACK.md`), the pipeline no longer embarrasses itself on real
+engagements. This release is the last two polish items.
+
+### Improved
+- **Tentative findings never lead the playbook.** A "Confirm and exploit …" step
+  backed only by tentative evidence is demoted below every confirmed-signal step
+  (and the review step), so the recommended next steps open on real signal.
+- **Finding counts read as a story.** The report summary now breaks findings down
+  by source (`blob_mining 4200, http_analysis 600, …`) in Markdown and as chips in
+  HTML, so a large total shows where the volume comes from instead of scaring the
+  reader with one number.
+
 ## [0.8.3]
 
 ### Fixed — "Where to test" points at in-scope surface

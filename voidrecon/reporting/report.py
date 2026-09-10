@@ -64,6 +64,15 @@ class Reporter:
             key=lambda f: (-f.severity.rank, f.module, f.title),
         )
 
+    def _findings_by_module(self) -> list[tuple[str, int]]:
+        """(module, count) for every finding source, most-numerous first — so a
+        big total reads as a story ('blob-mining: N, http-analysis: N') instead of
+        one scary number."""
+        from collections import Counter
+
+        c = Counter(f.module for f in self.store.findings())
+        return c.most_common()
+
     def _llm(self) -> dict | None:
         return getattr(self.store, "llm_analysis", None)
 
@@ -286,6 +295,11 @@ class Reporter:
             if counts.get(k):
                 lines.append(f"- {k}: **{counts[k]}**")
         lines.append(f"- findings: **{counts.get('findings', 0)}**")
+        by_mod = self._findings_by_module()
+        if by_mod:
+            breakdown = ", ".join(f"{m} {n}" for m, n in by_mod[:10])
+            lines.append(f"  - by source: {breakdown}"
+                         + (", …" if len(by_mod) > 10 else ""))
         lines.append("")
 
         health = self._source_health()
@@ -502,6 +516,13 @@ class Reporter:
         if not findings_html:
             findings_html = "<p><em>No findings recorded.</em></p>"
 
+        # "By source" line so a large finding count reads as a story, not noise.
+        by_mod = self._findings_by_module()
+        by_source_html = ""
+        if by_mod:
+            chips = "".join(f'<span class="src">{esc(m)} <b>{n}</b></span>' for m, n in by_mod[:14])
+            by_source_html = f'<div class="bysrc">by source: {chips}</div>'
+
         cand_html = ""
         if self._candidate_files:
             rows_c = "".join(
@@ -662,6 +683,9 @@ class Reporter:
   details.sevgroup > summary {{ cursor:pointer; font-weight:700; padding:6px 2px; list-style:none; }}
   details.sevgroup > summary::-webkit-details-marker {{ display:none; }}
   details.sevgroup[open] > summary {{ border-bottom:1px solid var(--border); margin-bottom:10px; }}
+  .bysrc {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; font-size:12px; color:var(--muted); align-items:center; }}
+  .bysrc .src {{ background:#161b22; border:1px solid var(--border); border-radius:20px; padding:2px 9px; }}
+  .bysrc .src b {{ color:var(--accent); }}
   code {{ background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }}
   .gallery {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }}
   figure {{ margin:0; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }}
@@ -682,7 +706,7 @@ class Reporter:
   {plan_html}
   {advice_html}
   {llm_html}
-  <section id="findings"><h2>Findings</h2>{findings_html}</section>
+  <section id="findings"><h2>Findings</h2>{by_source_html}{findings_html}</section>
   {cand_html}
   {gallery_html}
   <section><h2>Prioritised targets</h2>
