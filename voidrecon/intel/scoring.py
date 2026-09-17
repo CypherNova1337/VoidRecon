@@ -105,6 +105,19 @@ def score_asset(asset: Asset) -> tuple[float, list[str]]:
         score -= 5
         reasons.append("wildcard_origin(-5)")
 
+    # Attribution shaping — things that are probably not the target's own surface
+    # must not float to the top of the plan. -------------------------------------
+    tags = asset.tags
+    if "platform-tenant" in tags:
+        score *= 0.2
+        reasons.append("platform_tenant(x0.2)")
+    if "wildcard" in tags:
+        score *= 0.15
+        reasons.append("wildcard(x0.15)")
+    elif "verify-scope" in tags:
+        score *= 0.5
+        reasons.append("verify_scope(x0.5)")
+
     # Scope shaping ------------------------------------------------------------
     if asset.scope_state == ScopeState.OUT_OF_SCOPE:
         score *= 0.3

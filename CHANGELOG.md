@@ -7,6 +7,34 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.9.1]
+
+### Fixed — attribution & scope false positives (GitLab-run field review)
+Six ways the tool was treating things that aren't the target's own surface as if
+they were:
+
+- **CVE matching gained an OS gate + version provenance.** An OS-specific CVE
+  (e.g. CVE-2024-4577, Windows-only PHP-CGI RCE) now requires positive server-side
+  OS evidence — a bare PHP version on a Linux/unknown host no longer fires it (this
+  alone was 12 false criticals). Every match records where the version came from
+  (Server header, `X-Powered-By`, tech fingerprint).
+- **Wildcard-DNS fan-out collapses.** When many hostnames resolve to one IP and
+  return an identical response, they're one catch-all asset, not N targets —
+  collapsed to a representative, the rest marked `wildcard` and kept out of scoring.
+- **Out-of-wildcard hosts are flagged, not ranked.** A discovered host that isn't
+  positively in scope is tagged `verify-scope` and scored down, so a sibling/forum
+  stack doesn't dominate the top targets.
+- **GitHub secrets require target ownership.** A structurally-valid secret only
+  rates HIGH (and only seeds an attack play) when it's in a repo the target owns;
+  a secret-shaped string in a stranger's clone is LOW — third-party clones no
+  longer fill the HIGH section.
+- **Platform tenancy is recognised.** Hosts on shared platforms (`*.wordpress.com`,
+  `*.netlify.app`, `*.github.io`, hosted Discourse, …) — detected by hostname or
+  CNAME — are labelled `platform-tenant`, scored down hard, and excluded from the
+  plan. They're the platform's boxes, not the target's.
+- **Unverified buckets aren't recommended.** A name-matched bucket whose ownership
+  is unverified is no longer offered as a next step.
+
 ## [0.9.0] — Warrant
 
 Client-ready milestone: after a run of external field reviews (see

@@ -37,6 +37,30 @@ _HEADER_PRODUCTS = {
     "x-jenkins": "jenkins",
     "x-aspnet-version": "asp.net",
 }
+# Server-side OS fingerprints. Some CVEs only affect one OS (e.g. CVE-2024-4577
+# is a Windows-only PHP-CGI argument injection); firing them off a bare version
+# on a Linux host is a false critical.
+_OS_TOKENS = {
+    "windows": ("win64", "win32", "windows", "microsoft-iis", " iis/", "asp.net"),
+    "linux": ("ubuntu", "debian", "centos", "red hat", "redhat", "fedora",
+              "linux", "unix", "amazon", "alpine", "suse", "gentoo"),
+}
+
+
+def detect_os(asset) -> str | None:
+    """Best-effort server-side OS from banners/headers/tech. None when unknown —
+    and 'unknown' must not satisfy an OS-gated CVE."""
+    blob_parts = [str(asset.attrs.get("http_server") or "")]
+    fp = asset.attrs.get("fp_headers") or {}
+    blob_parts.extend(str(v) for v in fp.values())
+    blob_parts.extend(str(t) for t in (asset.attrs.get("technologies") or []))
+    blob = " ".join(blob_parts).lower()
+    if not blob.strip():
+        return None
+    for os_name, tokens in _OS_TOKENS.items():
+        if any(tok in blob for tok in tokens):
+            return os_name
+    return None
 
 
 def merge_signatures(base: list[dict], extra: list[dict]) -> list[dict]:
@@ -97,33 +121,36 @@ class CveMatch(Module):
             pairs = self._extract_pairs(asset)
             if not pairs:
                 continue
-            for name, version in pairs:
-                hits += self._match(ctx, asset, name, version, signatures)
+            os_seen = detect_os(asset)
+            for name, version, source in pairs:
+                hits += self._match(ctx, asset, name, version, source, os_seen, signatures)
         self.log.info("CVE correlation: %d version-based match(es) across %d signatures",
                       hits, len(signatures))
 
-    def _extract_pairs(self, asset) -> list[tuple[str, str]]:
-        pairs: list[tuple[str, str]] = []
-        strings: list[str] = []
+    def _extract_pairs(self, asset) -> list[tuple[str, str, str]]:
+        """(product, version, source) — source records where the version was read
+        from so a reviewer can weigh it (a Server banner is spoofable)."""
+        pairs: list[tuple[str, str, str]] = []
+        sourced: list[tuple[str, str]] = []   # (string, source-label)
         if asset.attrs.get("http_server"):
-            strings.append(str(asset.attrs["http_server"]))
+            sourced.append((str(asset.attrs["http_server"]), "server-header"))
         for tech in asset.attrs.get("technologies") or []:
-            strings.append(str(tech))
+            sourced.append((str(tech), "tech-fingerprint"))
         fp = asset.attrs.get("fp_headers") or {}
         for hkey, product in _HEADER_PRODUCTS.items():
             if fp.get(hkey):
                 v = re.search(r"\d+(?:\.\d+)+[a-z]?", str(fp[hkey]))
                 if v:
-                    pairs.append((product, v.group(0)))
+                    pairs.append((product, v.group(0), f"{hkey} header"))
         for hkey in ("x-powered-by", "x-generator", "generator"):
             if fp.get(hkey):
-                strings.append(str(fp[hkey]))
-        for s in strings:
+                sourced.append((str(fp[hkey]), f"{hkey} header"))
+        for s, source in sourced:
             for m in _PRODUCT_VER_RE.finditer(s):
-                pairs.append((m.group(1).strip().lower(), m.group(2)))
+                pairs.append((m.group(1).strip().lower(), m.group(2), source))
         return pairs
 
-    def _match(self, ctx, asset, name, version, signatures) -> int:
+    def _match(self, ctx, asset, name, version, source, os_seen, signatures) -> int:
         count = 0
         name = name.lower()
         for sig in signatures:
@@ -132,21 +159,32 @@ class CveMatch(Module):
             if not any(tok in name for tok in sig.get("match", [])):
                 continue
             for cve in sig.get("cves", []):
-                if in_range(version, cve.get("min"), cve.get("max")):
-                    ctx.add_finding(
-                        f"{cve['id']}: {cve.get('title', sig['product'])} ({sig['product']} {version})",
-                        module=self.name,
-                        severity=_SEV.get(str(cve.get("severity", "medium")).lower(), Severity.MEDIUM),
-                        confidence=Confidence.TENTATIVE,
-                        asset=asset.value,
-                        description=(
-                            f"Fingerprinted {sig['product']} {version} falls within the affected "
-                            f"range for {cve['id']}. Confirm the exact build and exploitability "
-                            "before reporting — banners can be spoofed or back-patched."
-                        ),
-                        evidence={"product": sig["product"], "version": version, "cve": cve["id"]},
-                        references=[cve["ref"]] if cve.get("ref") else [],
-                        tags={"cve", cve["id"]},
-                    )
-                    count += 1
+                if not in_range(version, cve.get("min"), cve.get("max")):
+                    continue
+                # OS gate: an OS-specific CVE needs positive server-side OS evidence
+                # for that OS. Unknown OS does NOT satisfy it — that's the fix for
+                # 12 false criticals off a bare PHP version.
+                need_os = (cve.get("os") or "").lower()
+                if need_os and os_seen != need_os:
+                    continue
+                ctx.add_finding(
+                    f"{cve['id']}: {cve.get('title', sig['product'])} ({sig['product']} {version})",
+                    module=self.name,
+                    severity=_SEV.get(str(cve.get("severity", "medium")).lower(), Severity.MEDIUM),
+                    confidence=Confidence.TENTATIVE,
+                    asset=asset.value,
+                    description=(
+                        f"Fingerprinted {sig['product']} {version} (from {source}) falls within the "
+                        f"affected range for {cve['id']}"
+                        + (f", and the host shows {need_os} server-side" if need_os else "")
+                        + ". Confirm the exact build and exploitability before reporting — banners "
+                        "can be spoofed or back-patched."
+                    ),
+                    evidence={"product": sig["product"], "version": version, "cve": cve["id"],
+                              "version_source": source,
+                              "os_required": need_os or None, "os_detected": os_seen},
+                    references=[cve["ref"]] if cve.get("ref") else [],
+                    tags={"cve", cve["id"]},
+                )
+                count += 1
         return count

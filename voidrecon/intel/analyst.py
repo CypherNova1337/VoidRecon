@@ -219,6 +219,10 @@ def analyze(ctx, limit: int = 10) -> dict:
         # Never headline a play on a host the scope engine says is out of bounds…
         if getattr(asset, "scope_state", None) == ScopeState.OUT_OF_SCOPE:
             continue
+        # …nor on shared-platform tenants or wildcard fan-out — those aren't the
+        # target's own surface (a wordpress.com blog, a catch-all mirror).
+        if {"platform-tenant", "wildcard"} & set(getattr(asset, "tags", set())):
+            continue
         # …or on an off-domain host the crawler wandered onto (links, OAuth
         # redirects) — those are not the target's attack surface.
         if asset.kind in (AssetKind.SUBDOMAIN, AssetKind.DOMAIN, AssetKind.URL, AssetKind.ENDPOINT):

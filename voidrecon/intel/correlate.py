@@ -45,10 +45,77 @@ def correlate(ctx: RunContext) -> None:
     _flag_takeover_candidates(ctx)
     _verify_bucket_ownership(ctx)
     _oauth_flow_intel(ctx)
+    _tag_platform_tenants(ctx)
+    _tag_verify_scope(ctx)
+    _collapse_wildcard_hosts(ctx)
     _dense_netblocks(ctx)
     _cluster_by_favicon(ctx)
     _cluster_by_tracker(ctx)
     _out_of_scope_leads(ctx)
+
+
+def _tag_platform_tenants(ctx: RunContext) -> None:
+    """Flag hosts that are tenants on a shared platform (wordpress.com, netlify.app,
+    a hosted Discourse, …). They're the platform's boxes, not the target's — kept
+    out of top-target scoring and clearly labelled so scope decisions are easy."""
+    from voidrecon.utils.tenants import platform_tenant
+
+    for a in ctx.store.assets(kind=AssetKind.SUBDOMAIN) + ctx.store.assets(kind=AssetKind.DOMAIN):
+        provider = platform_tenant(a.value, a.attrs.get("cname"))
+        if provider:
+            a.tags.add("platform-tenant")
+            a.tags.add("verify-scope")
+            a.attrs["platform"] = provider
+
+
+def _tag_verify_scope(ctx: RunContext) -> None:
+    """Mark discovered hosts that are not positively in scope as 'verify-scope' so
+    they don't headline the plan. An org's known wildcards define the surface; a
+    host outside them (a sibling brand, a community forum, an acquisition) is a
+    lead to confirm, not a target to score to the top."""
+    for a in ctx.store.assets(kind=AssetKind.SUBDOMAIN) + ctx.store.assets(kind=AssetKind.DOMAIN):
+        if a.scope_state == ScopeState.UNKNOWN:
+            a.tags.add("verify-scope")
+
+
+def _collapse_wildcard_hosts(ctx: RunContext) -> None:
+    """Collapse wildcard-DNS fan-out. When many hostnames resolve to one IP and
+    return the *same* HTTP response, they're one asset behind a wildcard/catch-all,
+    not N distinct targets. We keep one representative and mark the rest 'wildcard'
+    so they stop generating a dossier each."""
+    groups: dict[tuple, list] = defaultdict(list)
+    for a in ctx.store.assets(kind=AssetKind.SUBDOMAIN):
+        status = a.attrs.get("http_status")
+        ips = a.attrs.get("resolved_ips") or []
+        if not status or not ips:
+            continue   # need a resolved IP and a real response to fingerprint
+        ip = sorted(str(i) for i in ips)[0]
+        clen = a.attrs.get("content_length")
+        clen_bucket = (int(clen) // 256) if isinstance(clen, int) else None
+        fp = (ip, status, str(a.attrs.get("http_title") or ""), clen_bucket)
+        groups[fp].append(a)
+
+    for fp, members in groups.items():
+        if len(members) < 5:      # a handful sharing an IP is normal; a fan-out isn't
+            continue
+        members.sort(key=lambda a: a.score, reverse=True)
+        keep, rest = members[0], members[1:]
+        keep.attrs["wildcard_group"] = len(members)
+        for a in rest:
+            a.tags.add("wildcard")
+            a.tags.add("verify-scope")
+            a.attrs["wildcard_of"] = keep.value
+        ctx.add_finding(
+            f"Wildcard/catch-all DNS: {len(members)} hosts share {fp[0]} with an identical response",
+            module="correlate", severity=Severity.INFO, confidence=Confidence.LIKELY,
+            asset=keep.value,
+            description=("These hostnames all resolve to one IP and return the same page — a "
+                         "wildcard or catch-all, not distinct services. Collapsed to one asset; "
+                         "the rest are marked 'wildcard' and kept out of top-target scoring."),
+            evidence={"ip": fp[0], "count": len(members),
+                      "hosts": sorted(a.value for a in members)[:50]},
+            tags={"wildcard", "cluster"},
+        )
 
 
 def _oauth_flow_intel(ctx: RunContext) -> None:

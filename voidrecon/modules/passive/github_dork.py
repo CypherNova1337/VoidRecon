@@ -103,12 +103,22 @@ class GithubDork(Module):
             # repo merely named "hytale-*" does NOT belong to the target.
             owned = apex_label == rec["owner"] or apex_label in rec["owner"].split("-")
 
-            if real_secrets:
-                sev, what = Severity.HIGH, f"live secret(s): {', '.join(real_secrets[:4])}"
+            # A real secret only counts as the TARGET's leak when it lives in a repo
+            # the target owns. A secret-shaped string in a stranger's clone is that
+            # stranger's problem — it must not populate the HIGH section.
+            if real_secrets and owned:
+                sev, what = Severity.HIGH, f"live secret(s) in target-owned repo: {', '.join(real_secrets[:4])}"
+                is_target_secret = True
+            elif real_secrets:
+                sev, what = Severity.LOW, ("secret-shaped strings in a third-party repo "
+                                           "(likely not the target's — verify ownership)")
+                is_target_secret = False
             elif owned:
                 sev, what = Severity.MEDIUM, f"secret-flavoured matches ({', '.join(sorted(secret_dorks)[:2])})"
+                is_target_secret = False
             else:
                 sev, what = Severity.LOW, f"third-party repo mentions {apex} ({', '.join(sorted(secret_dorks)[:2])})"
+                is_target_secret = False
             flagged += 1
 
             sample = truncate(rec["fragments"][0], 240) if rec["fragments"] else "(no snippet returned)"
@@ -122,7 +132,8 @@ class GithubDork(Module):
                           "matched_dorks": sorted(secret_dorks), "snippet": sample,
                           "urls": sorted(rec["hits"])[:6]},
                 references=sorted(rec["hits"])[:4],
-                tags={"github", "leak-candidate"} | ({"secret"} if real_secrets else set()),
+                # Only a target-owned leak seeds the 'secret' attack signal.
+                tags={"github", "leak-candidate"} | ({"secret"} if is_target_secret else set()),
             )
         if repos:
             with_secrets = sum(

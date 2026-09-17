@@ -38,7 +38,9 @@ def test_cve_extract_pairs_from_server_and_headers():
         },
     )
     pairs = mod._extract_pairs(asset)
-    products = {name: ver for name, ver in pairs}
+    products = {name: ver for name, ver, _src in pairs}
     assert any("apache" in n for n in products)
-    assert ("jenkins", "2.440") in pairs
+    assert ("jenkins", "2.440", "x-jenkins header") in pairs
     assert any("php" in n for n in products)
+    # every pair now carries a provenance source
+    assert all(len(p) == 3 and p[2] for p in pairs)

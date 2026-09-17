@@ -23,7 +23,7 @@
       "product": "php",
       "match": ["php"],
       "cves": [
-        {"id": "CVE-2024-4577", "severity": "critical", "max": "8.3.7", "title": "PHP-CGI argument injection (Windows) RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2024-4577"},
+        {"id": "CVE-2024-4577", "severity": "critical", "max": "8.3.7", "os": "windows", "title": "PHP-CGI argument injection (Windows) RCE", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2024-4577"},
         {"id": "CVE-2019-11043", "severity": "critical", "min": "7.1.0", "max": "7.3.10", "title": "PHP-FPM underflow RCE (env_path_info)", "ref": "https://nvd.nist.gov/vuln/detail/CVE-2019-11043"}
       ]
     },

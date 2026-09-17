@@ -90,13 +90,16 @@ def recommend(ctx, limit: int = 12) -> list[dict]:
     findings = store.findings()
     tags_present: dict[str, list[str]] = {}
     tag_conf: dict[str, int] = {}   # best confidence seen for each tag
+    tag_all_unverified: dict[str, bool] = {}   # every finding for tag is unverified-owner?
     for f in findings:
         cr = _CONF_RANK.get(f.confidence.value, 0)
+        uv = "unverified-owner" in f.tags
         for tag in f.tags:
             tags_present.setdefault(tag, [])
             if f.asset:
                 tags_present[tag].append(f.asset)
             tag_conf[tag] = max(tag_conf.get(tag, -1), cr)
+            tag_all_unverified[tag] = uv if tag not in tag_all_unverified else (tag_all_unverified[tag] and uv)
 
     seed = ctx.scope.seeds[0] if ctx.scope.seeds else "target"
     done = set(getattr(store, "completed_modules", set()) or set())
@@ -104,6 +107,10 @@ def recommend(ctx, limit: int = 12) -> list[dict]:
     for rank, tag, action, why, cmd in _RULES:
         assets = tags_present.get(tag)
         if not assets and tag not in tags_present:
+            continue
+        # Don't recommend chasing assets whose ownership is unverified (e.g. a
+        # name-squatted bucket) — every finding behind this tag is unverified.
+        if tag_all_unverified.get(tag):
             continue
         uniq = sorted({a for a in assets if a})[:8]
         # A step backed only by tentative evidence must never lead the playbook —
