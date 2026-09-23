@@ -1,264 +1,188 @@
-<div align="center">
+# VoidRecon
 
-```
- __     __    _     _ ____
- \ \   / /__ (_) __| |  _ \ ___  ___ ___  _ __
-  \ \ / / _ \| |/ _` | |_) / _ \/ __/ _ \| '_ \
-   \ V / (_) | | (_| |  _ <  __/ (_| (_) | | | |
-    \_/ \___/|_|\__,_|_| \_\___|\___\___/|_| |_|
-```
+Maps a target's attack surface the way an intruder would — and keeps you inside scope while it does.
 
-### Adversary-minded reconnaissance for authorized bug bounty & pentest engagements
+![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+![python](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square)
+![modules](https://img.shields.io/badge/modules-50-informational?style=flat-square)
 
-**50 modules · 7 phases · Built-in AI Analyst (keyless)**
+## What it does
 
-*by [VoidSec-Hub](https://github.com/CypherNova1337)*
+Recon is usually a pipeline you assembled yourself: subfinder into httpx into
+katana into nuclei, glued with shell, with results in a dozen text files. It
+works, but nothing in it understands the engagement. It doesn't know what's in
+scope. It can't tell you which of four thousand findings matters. And when it
+dies at hour three, you start over.
 
-</div>
+VoidRecon is that pipeline as one engine. Fifty modules across seven phases —
+scope, passive, resolve, active, content, vuln, intel — each feeding the next,
+with everything landing in one datastore instead of scattered files.
 
----
+Three things make it different from a script. It has a **scope conscience**:
+scope is a first-class input, and modules won't touch what you excluded. It
+**scores** what it finds rather than emitting everything equally, with a
+built-in analyst that reasons about what to look at next. And runs are
+**resumable and comparable** — you can diff today's run against last month's and
+see exactly what appeared.
 
-> 🚧 **Work in progress** — under active development; interfaces may shift between releases. The engine and everything below work today.
+It is passive by default. Active modules only run when you ask for them.
 
-VoidRecon maps a target's attack surface the way a real intruder does — **organisation-first, passive-before-active, and focused on the forgotten corners** that checklists skip. It's not three tools in a pipe; it's a full recon engine with a scope conscience, a scoring brain, a built-in Analyst that reasons out your next move, a live progress checklist, resumable and distributable runs, and reports you can actually use.
+## Why you'd use it
 
-> ⚠️ **Authorized use only.** Passive collection is on by default. Anything that touches a target is gated behind `--active`/`--profile` **and** a positive in-scope check. Stay within your program's scope and the law.
-
----
-
-## Quickstart
-
-```bash
-pip install -e .          # or: pip install -e ".[full]"  for every optional feature
-voidrecon wizard          # interactive — asks a few questions, then runs
-```
-
-The wizard takes either domains typed inline **or a path to a list file** — any
-text file with one target per line. Prefixes and paths are stripped
-automatically, so a list exported as `https://example.com/login` runs exactly
-like a bare `example.com`.
-
-Prefer flags? Pick a one-word **profile**:
-
-```bash
-voidrecon run target.com --profile passive    # quiet OSINT only (safe default)
-voidrecon run target.com --profile quick      # active, fast, essentials
-voidrecon run target.com --profile standard   # active, default depth
-voidrecon run target.com --profile deep       # active, every module
-voidrecon run target.com --profile stealth    # active, very slow & quiet
-
-voidrecon run --targets-file targets.txt --profile deep   # feed a whole list at once
-```
-
-Results land in `runs/<target>-<timestamp>/` as JSON, Markdown, and a self-contained HTML report — and every run is appended to `runs/voidrecon.db` for diffing, dashboards, and the web UI.
+- **Scope is enforced, not documented.** Excluded hosts don't get probed
+  because the engine won't do it.
+- **Passive until told otherwise** — safe to point at a new target before you
+  know what you're allowed to touch.
+- **Findings are ranked**, with reasoning, instead of arriving as an
+  undifferentiated wall.
+- **Resumable**, and diffable against previous runs so you can see what changed.
+- **Organisation-first**, looking at the company's whole footprint rather than
+  one domain.
+- **Reports you can hand over**, plus a local web UI and trend dashboards.
 
 ## Install
 
 ```bash
-git clone https://github.com/CypherNova1337/VoidRecon && cd VoidRecon
-pip install -e .              # core
-pip install -e ".[full]"      # + tldextract, cryptography (TLS SANs), bs4
-pip install -e ".[screenshots]"  # + Playwright (screenshots, SPA crawl, prototype-pollution)
+git clone https://github.com/CypherNova1337/VoidRecon
+cd VoidRecon
+pip install .
 ```
 
-Python 3.10+. Core deps: `httpx`, `PyYAML`, `rich`, `dnspython`. `voidrecon update` pulls the latest from `main`.
-
-**Docker** (bundles the Go tools it orchestrates + a headless browser):
-
-```bash
-docker build -t voidrecon .
-docker run --rm -it -v "$PWD/runs:/runs" voidrecon run target.com --profile deep
-```
-
-## Configure API keys (optional but recommended)
-
-Run once — it saves your keys to `~/.config/voidrecon/config.yaml` and applies them to every run:
+Needs Python 3.10 or newer. Then:
 
 ```bash
 voidrecon setup
 ```
 
-It walks you through GitHub, Shodan, Censys, SecurityTrails, VirusTotal, notification channels (Slack/Discord/**Telegram**), the optional LLM, and an OOB domain for blind SSRF. Everything is optional — VoidRecon degrades gracefully without any key. You can also use environment variables (`VOIDRECON_SOURCES_*`, `VOIDRECON_NOTIFY_*`).
+Walks through API keys and notification settings, saved to your user config.
 
-## How it works
+## Usage
 
-VoidRecon runs as ordered **phases**, each enriching one shared, de-duplicated datastore. A dead source never aborts the run.
-
-| Phase | What happens | Touches target? |
-|-------|--------------|:---------------:|
-| **scope** | ASN + netblock footprint (shared-CDN aware), RDAP registration intel | No |
-| **passive** | Cert transparency, 8+ passive-DNS sources, web archives, GitHub dorking, dork generation, cloud buckets, DNS/email (SPF/DMARC/DKIM/CAA), AXFR + SPF-chain mining, reverse-IP, breaches, Shodan enrichment | No |
-| **resolve** | DNS resolution, wildcard-aware brute-force + permutations, reverse-DNS | No |
-| **active** | HTTP probing/fingerprinting, port discovery, live TLS-SAN harvesting | **Yes** |
-| **content** | Native + SPA crawling, dir/file fuzzing, parameter discovery, vhosts, CSP mining, deep tech fingerprint, CMS enum, JS mining + source maps, favicon/tracker pivoting, API + GraphQL, email harvesting, WAF detection, Cloudflare Access mapping, origin-IP unmasking, screenshots | **Yes** |
-| **vuln** | CVE correlation, subdomain-takeover verification, SQLi/SSRF/SSTI/CRLF/XSS/prototype-pollution/cache-deception/open-redirect probing, vuln-hint URL classification, JWT analysis, header/CORS/cookie analysis | **Yes** |
-| **intel** | Finding-aware scoring, correlation, **the Analyst** (attack chains + dossiers), optional LLM | No |
-
-See everything with `voidrecon modules`.
-
-## Intelligence & AI
-
-VoidRecon's "brain" works with **no API key and no limits** — the AI value doesn't depend on a paid LLM plan:
-
-- **Finding-aware scoring** ranks every asset by juiciness (dev/admin/API/exposed signals, risky ports, dangling records, secrets) *and folds in the findings actually landed on it* — a host with a real HIGH bug outranks one that merely looks juicy by name.
-- **The Analyst** reasons per host, not over a flat list. For each promising target it fuses the host's signals with its findings, recognises **multi-signal attack chains** that only make sense when several things co-occur on the *same* host, and writes a grounded **dossier** — what the host is, why it matters, and the exact play to run next:
-
-  ```
-  Attack plan — highest-value plays:
-    1. Leaked credential → authenticated access  on admin-api.target.com  (impact 92)
-       A secret leaks on a host that also gates access. Validate the secret
-       against the login/API — a live key walks you straight past the gate.
-    2. SQLi on a privileged surface  on admin-api.target.com  (impact 86)
-       → sqlmap -u 'https://admin-api.target.com/flows?id=1' --batch --risk 2 --level 3
-  ```
-
-  A chain fires only on real co-occurrence — a secret on one host and a login gate on another won't invent a play. The plan prints at the end of every run and renders as **Attack plan** / **Target dossiers** in the report.
-- **Optional LLM** (`--ai`) is *seeded with the Analyst's chains and dossiers* and asked to sharpen them (OpenAI / Anthropic / local Ollama) — it refines real reasoning instead of starting from scratch. Purely additive; everything above works without it.
+If you're new to it, let it ask:
 
 ```bash
-voidrecon run target.com --profile standard --ai         # uses configured LLM if present
-voidrecon run target.com --ai --llm-provider ollama --llm-model llama3.1   # fully local
+voidrecon wizard
 ```
 
-## Notifications
-
-Get pinged when a long run finishes (only if something at/above `notify.min_severity` turns up):
+A few questions, then it runs. Otherwise:
 
 ```bash
-voidrecon run target.com --profile deep --notify-webhook https://hooks.slack.com/...   # Slack/Discord
-# Telegram (set once via `voidrecon setup`, or):
-export VOIDRECON_NOTIFY_TELEGRAM_TOKEN=123:abc VOIDRECON_NOTIFY_TELEGRAM_CHAT_ID=456789
+voidrecon run example.com
 ```
 
-## Recon coverage — you can see what actually ran
+Passive by default — nothing touches the target.
 
-Passive OSINT sources fail in ways that used to be invisible: a rate-limit, a
-block, or a timeout looked identical to "nothing there," so a section coming back
-empty told you nothing. Every run now ends with a **Recon coverage** panel (in the
-terminal and in the report) showing exactly what each source returned:
-
-```
-Recon coverage:
-  ✓ crt.sh           ok (63)
-  ✓ certspotter      ok (12)
-  ✗ hackertarget     RATE-LIMITED
-  ✗ urlscan          BLOCKED (403/401)
-  • securitytrails   needs API key
-  • otx              nothing found
-
-  ⚠ 2 source(s) failed (rate-limited/blocked/timed out): hackertarget, urlscan.
-    An empty section may be a failed source, not an empty target —
-    add API keys (voidrecon setup) or re-run to fill gaps.
-```
-
-Rate-limited sources (HTTP 429) are retried honouring `Retry-After` instead of
-being dropped, and the slow-but-rich sources (crt.sh, the Wayback index) get a
-longer timeout and a retry so they stop silently falling out. `otx: nothing found`
-is a real empty; `hackertarget: RATE-LIMITED` is a gap you can close.
-
-## Output & review
-
-Each run folder (`runs/<target>-<timestamp>/`) contains the JSON/Markdown/HTML report **plus ready-to-use candidate lists** — one file per vulnerability class, so you can feed a whole class straight into the right tool.
-
-The lists are **deduplicated by injection point**, not by URL. A vulnerability lives at a parameter on a path, not at a specific value — so `/flows?id=1`, `/flows?id=2` … `/flows?id=999` collapse to **one** target (the `id` parameter on `/flows`), while `/flows?sort=name` stays separate because it's a different parameter. Each line keeps a real, non-empty value so dalfox/sqlmap/nuclei don't choke. That turns a 50-line dump of the same endpoint into the handful of distinct tests you actually need to run:
-
-```
-runs/<target>-<timestamp>/
-├── report.html / report.md / voidrecon.json
-├── dorks-<target>.html          # clickable Google/GitHub/Shodan dorks
-└── candidates/
-    ├── sqli.txt   xss.txt   ssrf.txt   lfi.txt   rce.txt
-    ├── redirect.txt  ssti.txt  idor.txt  ...
-```
+**Check your scope before running anything**
 
 ```bash
-# Pipe a whole class into the right tool — no copy/paste
-sqlmap -m runs/target.com-*/candidates/sqli.txt --batch
-cat runs/target.com-*/candidates/xss.txt   | dalfox pipe
-cat runs/target.com-*/candidates/lfi.txt   | nuclei -t lfi/
-cat runs/target.com-*/candidates/redirect.txt | while read u; do echo "$u"; done
+voidrecon scope -T targets.txt -x '*.dev.example.com'
 ```
 
-And to browse/track results:
+Shows the effective scope without running a single module. Do this first on any
+engagement with a complicated scope.
+
+**Turn on active modules**
 
 ```bash
-voidrecon serve                 # web UI over the datastore (runs, findings, filter, search)
-voidrecon dashboard target.com  # HTML trend dashboard across runs
-voidrecon diff target.com       # what changed since last run (new/removed assets & findings)
+voidrecon run example.com --active -p standard
 ```
 
-## Advanced
+**Pick an intensity**
 
 ```bash
-# Authenticated recon — logs in with a browser, reuses the session everywhere
-voidrecon run app.target.com --profile deep \
-  --login-url https://app.target.com/login --login-user u --login-pass p
+voidrecon run example.com -p quick      # fast pass
+voidrecon run example.com -p deep       # thorough
+voidrecon run example.com -p stealth    # slow and quiet
+```
 
-# Distributed — many workers drain one queue into one datastore
-voidrecon queue add a.com b.com c.com --active
-voidrecon worker &  voidrecon worker &
+**Work a bounty program's scope**
 
-# Resume an interrupted run exactly where it stopped
-voidrecon run target.com --resume target.com-20260810-101500
+```bash
+voidrecon run -u https://hackerone.com/example --import-scope
+```
 
-# Everything, loudest (confirmation required)
-voidrecon run target.com --aggressive
+Fetches and merges the program's scope. Never probes the target to do it.
+
+**Only certain phases or modules**
+
+```bash
+voidrecon run example.com --phases passive,resolve
+voidrecon run example.com --only crtsh,wayback
+voidrecon modules                        # see what's available
+```
+
+**Resume, and compare**
+
+```bash
+voidrecon run --resume RUN_ID
+voidrecon diff RUN_A RUN_B
+voidrecon dashboard example.com
+```
+
+**Browse results**
+
+```bash
+voidrecon serve
 ```
 
 ## Commands
 
-| Command | Purpose |
-|---------|---------|
-| `run` | Run a reconnaissance engagement |
-| `wizard` | Interactive guided setup + run |
-| `setup` | Configure API keys & notifications |
-| `modules` | List all modules |
-| `scope` | Parse/verify scope without running |
-| `diff` | Compare two runs |
-| `dashboard` | Build an HTML trend dashboard |
-| `serve` | Web UI over the datastore |
-| `queue` / `worker` | Distributed multi-worker runs |
-| `update` | Check for / install a newer version |
-| `update-cve` | Refresh the CVE signature dataset |
+| Command | What it's for |
+|---|---|
+| `run` | Run an engagement |
+| `wizard` | Guided setup that asks, then runs |
+| `scope` | Show effective scope without running anything |
+| `modules` | List the 50 modules and their phases |
+| `diff` | Compare two runs — what appeared, what went away |
+| `dashboard` | Build an HTML trend dashboard across runs |
+| `serve` | Browse the datastore in a local web UI |
+| `queue` / `worker` | Distribute work across several machines |
+| `setup` | Configure API keys and notifications |
+| `update` / `update-cve` | Update the tool and CVE signatures |
 
-VoidRecon checks for a newer version at startup and prints a one-line notice if you're behind (never auto-updates; disable with `--no-update-check`).
+### Key run options
 
-## Configuration
+| Flag | Default | What it does |
+|---|---|---|
+| `targets` | — | Seed domains, IPs or CIDRs |
+| `-T` | — | File of targets, one per line |
+| `-i` / `-x` | — | Add an in-scope / out-of-scope entry |
+| `-S` | — | Scope file |
+| `--import-scope` | off | Merge scope from a program page given by `-u` |
+| `--active` | **off** | Enable probing and scanning modules |
+| `-A` | off | Maximum coverage — loud, and asks first |
+| `-p` | `standard` | `passive`, `quick`, `standard`, `deep`, `stealth` |
+| `--phases` | all | Comma list of phases to run |
+| `--only` | all | Comma list of specific modules |
+| `--rps` / `--concurrency` | — | Throughput limits |
+| `-H` / `--cookie` / `--bearer` | — | Authenticate as a logged-in user |
+| `--login-url` / `--login-user` / `--login-pass` | — | Form login |
+| `--ai` / `--llm` | off | LLM analysis on top of the built-in advisor |
+| `--formats` | — | Report formats to write |
+| `--resume` | — | Continue a previous run |
+| `-o` | `runs/` | Output directory |
 
-Defaults live in [`configs/default.yaml`](configs/default.yaml). Precedence: built-in defaults → packaged config → `~/.config/voidrecon/config.yaml` (from `setup`) → `--config file` → env vars (`VOIDRECON_<SECTION>_<KEY>`) → CLI flags. Keys stay in the environment or your user config — never in the repo.
+## Good to know
 
-## Scope
+- **`--active` is the line.** Without it, nothing touches the target. With it,
+  you are scanning. Know which side you're on before you run it.
+- **`-A` is genuinely loud.** Maximum coverage, every opt-in module, heavier
+  throughput. It asks for confirmation for a reason.
+- **Run `scope` first on anything complicated.** Five seconds there beats
+  explaining why you probed an excluded host.
+- **Authenticate when you can.** An authenticated crawl sees a different
+  application, and it's usually the more interesting one.
+- **Scoring is a priority hint, not a verdict.** It sorts your queue; it doesn't
+  confirm bugs.
+- **Fifty modules produce a lot.** Start with `-p quick` to see the shape of a
+  target before committing to `deep`.
 
-```bash
-voidrecon run target.com --include "*.target.com" --exclude blog.target.com
-voidrecon run --scope-file program-scope.txt --url https://hackerone.com/x --import-scope
-```
+## Authorised use
 
-Scope entries accept apex domains (covering subdomains by default), explicit hosts, wildcards, IPs, CIDRs, and URLs. Out-of-scope assets are still *recorded* as leads but **never actively probed**.
-
-## Integrations & credits
-
-Used automatically when present; everything degrades gracefully without them:
-
-- **[dns-helix](https://github.com/CypherNova1337/dns-helix)** — bundled resolver list; binary orchestrated for DNS brute-force.
-- **[paramvoid](https://github.com/CypherNova1337/paramvoid)** — bundled parameter wordlist; binary used for parameter discovery.
-- **[GF_Patterns](https://github.com/CypherNova1337/GF_Patterns)** — powers vuln-hint URL classification.
-- ProjectDiscovery (`subfinder`, `httpx`, `naabu`, `nuclei`, `katana`), `gau`, `gowitness`, `amass`, `sourcemapper`.
-
-## Development
-
-```bash
-make setup    # editable install with dev + full extras
-make test     # pytest      (106 tests)
-make lint     # ruff
-```
-
-CI runs ruff + pytest on Python 3.10–3.12. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md).
-
-## Legal & ethics
-
-VoidRecon is for authorized security testing only — assets you own or are explicitly permitted to test under a bug bounty program or written engagement. Verify every lead before acting, honour program scope, and comply with all applicable laws. The authors and VoidSec-Hub accept no liability for misuse.
+Only against targets you own or that are in scope for an engagement or bounty
+programme you're part of. The scope features exist to help you stay inside the
+agreement — they don't create one.
 
 ## License
 
-[MIT](LICENSE) © 2026 VoidSec-Hub
+MIT — see [LICENSE](LICENSE). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
