@@ -927,18 +927,45 @@ def _cmd_wizard(args) -> int:
         profile = {"1": "passive", "2": "quick", "3": "standard",
                    "4": "deep", "5": "stealth"}.get(choice, "standard")
         ai = input("  Enable AI/LLM analysis? (needs a key) [y/N]: ").strip().lower() in ("y", "yes")
+
+        # Authenticated session — only worthwhile once we're touching the target,
+        # but it dramatically widens active coverage (logged-in pages, authed APIs).
+        cookies, headers, bearer = [], [], None
+        login_url = login_user = login_pass = None
+        if profile != "passive":
+            print("\n  Authenticated session? Deeper coverage of the logged-in surface:")
+            print("    a) none  [default]")
+            print("    b) paste a cookie / token")
+            print("    c) browser login (VoidRecon logs in and reuses the session)")
+            ach = input("  Choose a-c [a]: ").strip().lower() or "a"
+            if ach == "b":
+                ck = input("    Cookie(s) 'name=value' (comma-separated), blank to skip: ").strip()
+                cookies = [c.strip() for c in ck.split(",") if c.strip()]
+                bearer = input("    Bearer token, blank to skip: ").strip() or None
+                hdr = input("    Custom header 'Name: value', blank to skip: ").strip()
+                headers = [hdr] if hdr else []
+            elif ach == "c":
+                import getpass
+                login_url = input("    Login URL: ").strip() or None
+                login_user = input("    Username / email: ").strip() or None
+                login_pass = getpass.getpass("    Password (hidden): ") or None
+
         scope_extra = input("  Extra in-scope entries (optional, space-separated): ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\ncancelled", file=sys.stderr)
         return 130
 
     active = profile != "passive"
+    authed = bool(cookies or headers or bearer or login_url)
     shown = " ".join(targets[:3]) + (" …" if len(targets) > 3 else "")
-    print(f"\n→ voidrecon run {shown} --profile {profile}" + (" --ai" if ai else ""))
+    print(f"\n→ voidrecon run {shown} --profile {profile}"
+          + (" --ai" if ai else "") + (" (authenticated)" if authed else ""))
     run_args = _run_namespace(
         targets=targets,
         include=scope_extra.split() if scope_extra else [],
         profile=profile, active=active, ai=ai,
+        cookie=cookies, header=headers, bearer=bearer,
+        login_url=login_url, login_user=login_user, login_pass=login_pass,
         no_live=False, no_banner=True, yes=True,
     )
     return asyncio.run(_run(run_args))

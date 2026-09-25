@@ -71,6 +71,22 @@ class RunContext:
         """Authenticated-session headers, for browser-driven modules to replay."""
         return dict(self.config.get("auth.headers", {}) or {})
 
+    @property
+    def auth_cookies(self) -> dict:
+        """Authenticated-session cookies (from --cookie or a scripted login)."""
+        return dict(self.config.get("auth.cookies", {}) or {})
+
+    def auth_client_kwargs(self) -> dict:
+        """headers/cookies to seed a module's *own* httpx client with, so modules
+        that can't use the shared client still run authenticated. Empty when no
+        session is configured."""
+        out: dict = {}
+        if self.auth_headers:
+            out["headers"] = self.auth_headers
+        if self.auth_cookies:
+            out["cookies"] = self.auth_cookies
+        return out
+
     def can_touch(self, value: str) -> bool:
         """True only if active mode is on AND the asset is positively in scope."""
         if not self.active_allowed:

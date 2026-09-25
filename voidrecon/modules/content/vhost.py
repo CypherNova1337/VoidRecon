@@ -59,7 +59,9 @@ class Vhost(Module):
         sem = asyncio.Semaphore(min(int(ctx.config.get("opsec.max_concurrency", 20)), 20))
         found = 0
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=timeout) as client:
+        # Replay any authenticated session onto discovered virtual hosts.
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=timeout,
+                                     **ctx.auth_client_kwargs()) as client:
             for ip in web_ips:
                 found += await self._scan_ip(ctx, client, ip, candidates, sem)
         self.log.info("vhost discovery complete: %d hidden vhost(s)", found)

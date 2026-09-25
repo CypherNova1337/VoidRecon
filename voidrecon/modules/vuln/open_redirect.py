@@ -51,7 +51,10 @@ class OpenRedirect(Module):
         sem = asyncio.Semaphore(int(ctx.config.get("opsec.max_concurrency", 20)))
         found = 0
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=timeout) as client:
+        # Carry any authenticated session so post-login redirect endpoints
+        # (e.g. ?returnTo= behind a gate) are covered too.
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=timeout,
+                                     **ctx.auth_client_kwargs()) as client:
             async def worker(item):
                 nonlocal found
                 async with sem:

@@ -7,6 +7,18 @@ This project is pre-1.0 and under active development; interfaces may change.
 
 ## [Unreleased]
 
+## [0.9.2]
+
+### Improved — authenticated coverage
+- **The wizard now offers an authenticated session.** On an active profile it asks
+  whether to run logged-in — paste a cookie/token, or have VoidRecon log in through
+  a browser and reuse the session — so deeper coverage of the logged-in surface is
+  one prompt away, not a flag you have to know about.
+- **The last unauthenticated modules now carry the session.** `open_redirect` and
+  `vhost` ran their own HTTP client and silently dropped the auth headers/cookies;
+  they now replay the session via the new `RunContext.auth_client_kwargs()`, so an
+  authenticated run reaches post-login redirect endpoints and virtual hosts too.
+
 ## [0.9.1]
 
 ### Fixed — attribution & scope false positives (GitLab-run field review)
